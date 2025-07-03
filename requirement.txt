@@ -1,3 +1,6 @@
+peft
+accelerate
+bitsandbytes
 streamlit
 gspread
 oauth2client
