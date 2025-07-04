@@ -3,4 +3,3 @@ gspread
 oauth2client
 transformers
 torch
-sentencepiece==0.1.99
