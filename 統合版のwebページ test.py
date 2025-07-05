@@ -76,7 +76,7 @@ if page == "Personality Test":
 
     if st.session_state.get("completed_test", False):
         if st.button("Go to Chat"):
-            st.experimental_rerun()
+            st.rerun()
 
 
 # === Chat画面 ===
@@ -117,8 +117,8 @@ if page == "Chat":
     for msg in st.session_state.chat_history:
         st.markdown(f"**{msg['role']}:** {msg['content']}")
 
-    user_input = st.text_input("Your message:")
-    if st.button("Send") and user_input:
+    user_input = st.chat_input("Your message")
+    if user_input:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         ai_reply = generate_response(user_input)
@@ -126,8 +126,9 @@ if page == "Chat":
 
         chat_sheet.append_row([user_name, "user", user_input, now])
         chat_sheet.append_row([user_name, "bot", ai_reply, now])
-        st.experimental_rerun()
+        st.rerun()
+
 
     if st.button("Clear Chat"):
         st.session_state.chat_history = []
-        st.experimental_rerun()
+        st.rerun()
