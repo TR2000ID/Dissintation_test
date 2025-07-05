@@ -71,7 +71,13 @@ if page == "Personality Test":
             row.append(round(avg))
 
         profile_sheet.append_row(row)
-        st.success("Saved. Please return and enter your name to chat.")
+        st.success("Saved. You can now proceed to chat.")
+        st.session_state["completed_test"] = True
+
+    if st.session_state.get("completed_test", False):
+        if st.button("Go to Chat"):
+            st.experimental_rerun()
+
 
 # === Chat画面 ===
 def get_profile(user):
