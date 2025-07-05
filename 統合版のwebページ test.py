@@ -9,22 +9,28 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 
-# ✅ Google secrets（[GOOGLE_SERVICE_ACCOUNT_JSON] セクションから取得）
-creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]
-
-# ✅ 辞書を一時ファイルに保存して gspread 用に渡す
+import json
 import tempfile
+import streamlit as st
+from oauth2client.service_account import ServiceAccountCredentials
+import gspread
+
+# ✅ secrets.toml から service account 情報を辞書形式で取得
+creds_dict = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
+
+# ✅ 一時ファイルに JSON として書き込む
 with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as tmp:
     json.dump(creds_dict, tmp)
     tmp_path = tmp.name
 
-# ✅ スコープと認証処理
-from oauth2client.service_account import ServiceAccountCredentials
+# ✅ Google Sheets 認証
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive"
 ]
 credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
+client = gspread.authorize(credentials)
+
 
 # ✅ gspreadクライアント作成
 import gspread
