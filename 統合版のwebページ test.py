@@ -132,7 +132,15 @@ if page == "Chat":
         st.session_state.persona_prompt = generate_persona_prompt(profile)
 
     if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+        # === 初回のみ：Google Sheets からチャット履歴をロード ===
+        chat_history = []
+        rows = chat_sheet.get_all_values()[1:]  # ヘッダー除外
+        for row in rows:
+            name, role, message, _ = row
+            if name == user_name:
+                chat_history.append({"role": role, "content": message})
+        st.session_state.chat_history = chat_history
+
 
     for msg in st.session_state.chat_history:
         st.markdown(f"**{msg['role']}:** {msg['content']}")
