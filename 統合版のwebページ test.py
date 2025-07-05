@@ -15,21 +15,24 @@ import streamlit as st
 from oauth2client.service_account import ServiceAccountCredentials
 import gspread
 
-# ✅ secrets.toml から service account 情報を辞書形式で取得
+# ✅ Streamlit Secrets から JSON構造を復元
 creds_dict = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
+# triple-quoted で保存されているので、private_key は改行を復元
+creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
-# ✅ 一時ファイルに JSON として書き込む
+# ✅ 一時ファイルとして保存
 with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as tmp:
     json.dump(creds_dict, tmp)
     tmp_path = tmp.name
 
-# ✅ Google Sheets 認証
+# ✅ gspread認証
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive"
 ]
 credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
 client = gspread.authorize(credentials)
+
 
 
 # ✅ gspreadクライアント作成
