@@ -1,85 +1,37 @@
-# ✅ Final version of Streamlit app.py for deployment (no model yet, dummy response)
-
 import streamlit as st
 import gspread
-import os
 import json
 import tempfile
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-
-
-import json
-import tempfile
-import streamlit as st
 from oauth2client.service_account import ServiceAccountCredentials
-import gspread
 
-# ✅ Streamlit Secrets から JSON構造を復元
+# === Google Sheets 認証 ===
 creds_dict = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
-# triple-quoted で保存されているので、private_key は改行を復元
 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
-# ✅ 一時ファイルとして保存
 with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as tmp:
     json.dump(creds_dict, tmp)
     tmp_path = tmp.name
 
-# ✅ gspread認証
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
 client = gspread.authorize(credentials)
 
-
-
-# ✅ gspreadクライアント作成
-import gspread
-client = gspread.authorize(credentials)
-
-
-# === Google Sheets Authentication via Streamlit secrets ===
-creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]
-
-with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as tmp:
-    json.dump(creds_dict, tmp)
-    tmp_path = tmp.name
-
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
-credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
-client = gspread.authorize(credentials)
-
-
-scope = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive"
-]
-credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
-client = gspread.authorize(credentials)
-
-# === Load Google Sheets ===
+# === Google Sheets 接続 ===
 chat_sheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM").worksheet("Chat")
 profile_sheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM").worksheet("Personality")
-
-# === Get existing usernames ===
 existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
 
-# === Sidebar input ===
+# === ユーザー認証（サイドバー）===
 st.sidebar.title("User Login")
 user_name = st.sidebar.text_input("Enter your username")
-
 if not user_name:
     st.warning("Please enter your username.")
     st.stop()
 
 page = "Chat" if user_name in existing_users else "Personality Test"
 
-# === Personality Test ===
+# === 質問リスト ===
 questions = [
     ("I am the life of the party", "Extraversion", False),
     ("I don't talk a lot", "Extraversion", True),
@@ -93,6 +45,7 @@ questions = [
     ("I am not interested in abstract ideas", "Openness", True)
 ]
 
+# === パーソナリティテスト画面 ===
 if page == "Personality Test":
     st.title("Big Five Personality Test")
     responses = []
@@ -106,10 +59,8 @@ if page == "Personality Test":
     if submitted:
         traits = {t: 0 for _, t, _ in questions}
         trait_counts = {t: 0 for t in traits}
-
         for r, (q, t, rev) in zip(responses, questions):
-            score = 6 - r if rev else r
-            traits[t] += score
+            traits[t] += 6 - r if rev else r
             trait_counts[t] += 1
 
         st.subheader("Your Personality Results")
@@ -122,7 +73,7 @@ if page == "Personality Test":
         profile_sheet.append_row(row)
         st.success("Saved. Please return and enter your name to chat.")
 
-# === Persona-based Chat ===
+# === Chat画面 ===
 def get_profile(user):
     for row in profile_sheet.get_all_records():
         if row["Username"] == user:
@@ -158,9 +109,7 @@ if page == "Chat":
         st.session_state.chat_history = []
 
     for msg in st.session_state.chat_history:
-        role = msg["role"]
-        content = msg["content"]
-        st.markdown(f"**{role}:** {content}")
+        st.markdown(f"**{msg['role']}:** {msg['content']}")
 
     user_input = st.text_input("Your message:")
     if st.button("Send") and user_input:
@@ -171,7 +120,6 @@ if page == "Chat":
 
         chat_sheet.append_row([user_name, "user", user_input, now])
         chat_sheet.append_row([user_name, "bot", ai_reply, now])
-
         st.experimental_rerun()
 
     if st.button("Clear Chat"):
