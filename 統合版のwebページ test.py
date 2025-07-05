@@ -30,11 +30,21 @@ credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
 import gspread
 client = gspread.authorize(credentials)
 
-# === Google Sheets Authentication via Secrets ===
-creds_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+
+# === Google Sheets Authentication via Streamlit secrets ===
+creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]
+
 with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as tmp:
-    tmp.write(creds_json)
+    json.dump(creds_dict, tmp)
     tmp_path = tmp.name
+
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
+credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
+client = gspread.authorize(credentials)
+
 
 scope = [
     "https://spreadsheets.google.com/feeds",
