@@ -6,7 +6,7 @@ from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 
 # === Google Sheets 認証 ===
-creds_dict = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
+creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
 with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".json") as tmp:
