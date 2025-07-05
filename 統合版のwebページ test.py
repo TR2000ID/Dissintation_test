@@ -22,14 +22,34 @@ chat_sheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM").
 profile_sheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM").worksheet("Personality")
 existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
 
+
 # === ユーザー認証（サイドバー）===
 st.sidebar.title("User Login")
-user_name = st.sidebar.text_input("Enter your username")
-if not user_name:
-    st.warning("Please enter your username.")
-    st.stop()
+
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
+
+if st.session_state.user_name == "":
+    st.session_state.user_name = st.sidebar.text_input("Enter your username")
+    if not st.session_state.user_name:
+        st.warning("Please enter your username.")
+        st.stop()
+else:
+    st.sidebar.markdown(f"**Welcome, {st.session_state.user_name}!**")
+
+user_name = st.session_state.user_name
 
 page = "Chat" if user_name in existing_users else "Personality Test"
+
+# === ユーザー専用のチャットシートを取得 or 作成 ===
+spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
+
+try:
+    chat_sheet = spreadsheet.worksheet(user_name)
+except gspread.exceptions.WorksheetNotFound:
+    chat_sheet = spreadsheet.add_worksheet(title=user_name, rows="1000", cols="4")
+    chat_sheet.append_row(["Username", "Role", "Message", "Timestamp"])  # ヘッダー
+
 
 # === 質問リスト ===
 questions = [
