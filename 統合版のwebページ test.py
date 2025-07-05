@@ -144,13 +144,13 @@ if page == "Chat":
 
     for msg in st.session_state.chat_history:
         role = msg["role"].lower()
-        avatar = "🧑" if role == "user" else "🤖"
+        avatar = "" if role == "user" else "🤖"
         bubble_color = "#DCF8C6" if role == "user" else "#E8E8E8"
     
         with st.chat_message(role, avatar=avatar):
             st.markdown(
                 f"""
-                <div style="background-color: {bubble_color}; padding: 10px; border-radius: 10px; max-width: 90%; word-wrap: break-word;">
+                <div style="background-color: {bubble_color}; color:black; padding: 10px; border-radius: 10px; max-width: 90%; word-wrap: break-word;">
                     {msg['content']}
                 </div>
                 """,
