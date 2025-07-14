@@ -163,11 +163,18 @@ def generate_response(user_input):
     prompt = f"{persona}\n{user_input}"
 
     try:
-        res = requests.post("https://xxxx.ngrok.io/generate", json={"prompt": prompt}, timeout=30)
-        return res.json()["response"]
+        response = requests.post(
+            "https://huggingface.co/spaces/RoyalMilkTea103986368/Dissintation/api/predict/",
+            json={"data": [prompt]},
+            timeout=30
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result["data"][0]  # Spaces標準構造 {"data": [返答]}
     except Exception as e:
         print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
+
 
 def get_chatbot_style(profile, history_len):
     # 明示的にマッチモードがONなら一致型を返す
