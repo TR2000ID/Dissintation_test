@@ -4,9 +4,6 @@ import json
 import tempfile
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
-import torch
 import requests
 
 def load_model():
