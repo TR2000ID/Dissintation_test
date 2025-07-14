@@ -170,13 +170,54 @@ def generate_response(user_input):
         return "Sorry, the assistant is currently unavailable."
 
 def get_chatbot_style(profile, history_len):
+    # 明示的にマッチモードがONなら一致型を返す
+    if st.session_state.get("matched_mode", False):
+        return generate_persona_prompt(profile, match=True)
+    
+    # 非一致期間中（最初の30ターン）
     if history_len < MAX_NONMATCH_ROUNDS:
         return generate_persona_prompt(profile, match=False)
-    else:
-        return generate_persona_prompt(profile, match=True)
+    
+    # 30ターンを超えても未切替（案内済みで保留中）
+    return generate_persona_prompt(profile, match=False)
+
+if page == "Personality Test":
+    st.title("Big Five Personality Test")
+    responses = []
+
+    with st.form("personality_form"):
+        st.write("Rate from 1 (Disagree) to 5 (Agree)")
+        for q, _, _ in questions:
+            responses.append(st.slider(q, 1, 5, 3))
+        submitted = st.form_submit_button("Submit")
+
+    if submitted:
+        traits = {t: 0 for _, t, _ in questions}
+        trait_counts = {t: 0 for t in traits}
+        for r, (q, t, rev) in zip(responses, questions):
+            traits[t] += 6 - r if rev else r
+            trait_counts[t] += 1
+
+        st.subheader("Your Personality Results")
+        row = [user_name]
+        for trait in traits:
+            avg = traits[trait] / trait_counts[trait] * 20
+            st.write(f"{trait}: {round(avg)} / 100")
+            row.append(round(avg))
+
+        profile_sheet.append_row(row)
+        st.success("Saved. You can now proceed to chat.")
+        st.session_state["completed_test"] = True
+
+    if st.session_state.get("completed_test", False):
+        if st.button("Go to Chat"):
+            st.rerun()
 
 
 if page == "Chat":
+    if "matched_mode" not in st.session_state:
+        st.session_state["matched_mode"] = False
+
     st.title(f"Chatbot - {user_name}")
 
     profile = get_profile(user_name)
@@ -197,6 +238,7 @@ if page == "Chat":
                 chat_history.append({"role": role, "content": message})
         st.session_state.chat_history = chat_history
 
+    history_len = len(st.session_state.chat_history) // 2  # 1往復＝2行
 
     for msg in st.session_state.chat_history:
         role = msg["role"].lower()
@@ -213,18 +255,28 @@ if page == "Chat":
             )
 
 
-    user_input = st.chat_input("Your message")
-    if user_input:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        st.session_state.chat_history.append({"role": "User", "content": user_input})
-        ai_reply = generate_response(user_input)
-        st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
-
-        chat_sheet.append_row([user_name, "user", user_input, now])
-        chat_sheet.append_row([user_name, "bot", ai_reply, now])
+# --- ① 30ターン後の切り替え案内 ---
+if (
+    history_len >= MAX_NONMATCH_ROUNDS and 
+    "matched_mode" not in st.session_state
+):
+    st.info("We've now learned your personality. Would you like to switch to a chatbot that better matches your traits?")
+    if st.button("Switch to matched chatbot"):
+        st.session_state["matched_mode"] = True
+        st.success("Switched to matched chatbot personality!")
         st.rerun()
 
+# --- ② 通常のチャット入力処理（案内の有無に関わらず実行） ---
+user_input = st.chat_input("Your message")
+if user_input:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    st.session_state.chat_history.append({"role": "User", "content": user_input})
+    ai_reply = generate_response(user_input)
+    st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
-    if st.button("Clear Chat"):
-        st.session_state.chat_history = []
-        st.rerun()
+    log_sheet = match_sheet if st.session_state.get("matched_mode", False) else mismatch_sheet
+    log_sheet.append_row([user_name, "user", user_input, now])
+    log_sheet.append_row([user_name, "bot", ai_reply, now])
+
+    st.rerun()
+
