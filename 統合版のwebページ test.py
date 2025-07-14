@@ -176,6 +176,7 @@ if page == "Personality Test":
         submitted = st.form_submit_button("Submit")
 
     if submitted:
+        # Calculate trait scores
         traits = {t: 0 for _, t, _ in questions}
         trait_counts = {t: 0 for t in traits}
         for r, (q, t, rev) in zip(responses, questions):
@@ -184,11 +185,47 @@ if page == "Personality Test":
 
         st.subheader("Your Personality Results")
         row = [user_name]
-        for trait in traits:
-            avg = traits[trait] / trait_counts[trait] * 20
-            st.write(f"{trait}: {round(avg)} / 100")
-            row.append(round(avg))
 
+        # Explanations for score ranges
+        explanations = {
+            "Extraversion": [
+                (0, 39, "You are reserved and quiet, and may prefer calm environments."),
+                (40, 59, "You are balanced between social and quiet settings."),
+                (60, 100, "You are energetic, outgoing, and enjoy social interactions.")
+            ],
+            "Agreeableness": [
+                (0, 39, "You tend to be more direct and assertive in your opinions."),
+                (40, 59, "You generally get along with others, but also value fairness."),
+                (60, 100, "You are caring, cooperative, and sensitive to others’ needs.")
+            ],
+            "Conscientiousness": [
+                (0, 39, "You may be spontaneous and flexible, but sometimes disorganized."),
+                (40, 59, "You are reasonably organized and goal-focused."),
+                (60, 100, "You are highly responsible, detail-oriented, and self-disciplined.")
+            ],
+            "Emotional Stability": [
+                (0, 39, "You may experience mood swings or stress more easily."),
+                (40, 59, "You have moderate emotional resilience."),
+                (60, 100, "You remain calm and composed, even under pressure.")
+            ],
+            "Openness": [
+                (0, 39, "You tend to prefer routine and practicality over novelty."),
+                (40, 59, "You are moderately open to new ideas and experiences."),
+                (60, 100, "You are imaginative, curious, and open to creative thinking.")
+            ]
+        }
+
+        # Display results and explanations
+        for trait in traits:
+            avg = round(traits[trait] / trait_counts[trait] * 20)
+            st.markdown(f"**{trait}**: {avg} / 100")
+            for (low, high, explanation) in explanations[trait]:
+                if low <= avg <= high:
+                    st.markdown(f"→ *{explanation}*")
+                    break
+            row.append(avg)
+
+        # Save results to Google Sheets
         profile_sheet.append_row(row)
         st.success("Saved. You can now proceed to chat.")
         st.session_state["completed_test"] = True
@@ -196,6 +233,7 @@ if page == "Personality Test":
     if st.session_state.get("completed_test", False):
         if st.button("Go to Chat"):
             st.rerun()
+
 
 
 if page == "Chat":
@@ -210,14 +248,15 @@ if page == "Chat":
         with st.expander("Optional Survey Request"):
             st.markdown(
                 """
-                Before you begin chatting, we’d like to kindly ask for your help.
+                Before you begin chatting, I'd like to kindly ask for your help.
 
                 We're conducting a small study on how different chatbot styles affect mental wellbeing.  
                 If you're willing, **please take 1–2 minutes to answer this short anonymous form** before chatting:
 
                 👉 [Click here to open the form](https://forms.gle/hyAj45PPrfCxvu4J8)
 
-                This helps us improve the chatbot for future users. Thank you so much!
+                This helps us understand how effective this chatbot can help people.
+                Thank you very much.
                 """
             )
 
