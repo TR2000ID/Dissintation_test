@@ -6,24 +6,6 @@ from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
 
-def load_model():
-    model_name = "mistralai/Mistral-7B-Instruct-v0.3"
-    adapter_path = "/content/drive/MyDrive/nous-hermes-mental-lora_2" 
-
-    base_model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-    tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
-    tokenizer.eos_token = tokenizer.eos_token or tokenizer.pad_token
-    tokenizer.bos_token = tokenizer.bos_token or tokenizer.eos_token
-
-    model = PeftModel.from_pretrained(base_model, adapter_path)
-    model.eval()
-
-    return model, tokenizer
-
-model, tokenizer = load_model()
-
 # === Google Sheets 認証 ===
 creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
