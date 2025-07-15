@@ -135,22 +135,23 @@ def generate_persona_prompt(profile, match=True):
 
 def generate_response(user_input):
     profile = get_profile(user_name)
-    history_len = len(st.session_state.chat_history) // 2  # 1往復＝2行
+    history_len = len(st.session_state.chat_history) // 2
     persona = get_chatbot_style(profile, history_len)
     prompt = f"{persona}\n{user_input}"
 
     try:
         response = requests.post(
-            "https://huggingface.co/spaces/RoyalMilkTea103986368/Dissintation/api/predict/",
-            json={"data": [prompt]},
-            timeout=30
+            "https://royalmilktea103986368-dissintation.hf.space/generate",  # FastAPI版のURL
+            json={"prompt": prompt, "max_tokens": 256, "temperature": 0.7},
+            timeout=60
         )
         response.raise_for_status()
         result = response.json()
-        return result["data"][0] 
+        return result["response"]
     except Exception as e:
         print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
+
 
 
 def get_chatbot_style(profile, history_len):
