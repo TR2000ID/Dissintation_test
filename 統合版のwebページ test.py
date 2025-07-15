@@ -102,7 +102,7 @@ else:
 user_name = st.session_state.user_name
 page = "Chat" if user_name in existing_users else "Personality Test"
 
-# === パーソナリティテスト ===
+# === 心理テスト ===
 MAX_NONMATCH_ROUNDS = 30
 
 def get_profile(user):
@@ -147,18 +147,18 @@ def generate_response(user_input):
         )
         response.raise_for_status()
         result = response.json()
-        return result["data"][0]  # Spaces標準構造 {"data": [返答]}
+        return result["data"][0] 
     except Exception as e:
         print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
 
 
 def get_chatbot_style(profile, history_len):
-    # 明示的にマッチモードがONなら一致型を返す
+    # マッチがTrueなら性格が一致しているチャットボットにする
     if st.session_state.get("matched_mode", False):
         return generate_persona_prompt(profile, match=True)
     
-    # 非一致期間中（最初の30ターン）
+    # わざと真逆の性格のチャットボットにする（最初の30ターン）
     if history_len < MAX_NONMATCH_ROUNDS:
         return generate_persona_prompt(profile, match=False)
     
@@ -170,13 +170,13 @@ if page == "Personality Test":
     responses = []
 
     with st.form("personality_form"):
-        st.write("Rate from 1 (Disagree) to 5 (Agree)")
+        st.write("Rate each statement from 1 (Disagree) to 5 (Agree):")
         for q, _, _ in questions:
             responses.append(st.slider(q, 1, 5, 3))
         submitted = st.form_submit_button("Submit")
 
     if submitted:
-        # Calculate trait scores
+        #心理テストのスコアを計算
         traits = {t: 0 for _, t, _ in questions}
         trait_counts = {t: 0 for t in traits}
         for r, (q, t, rev) in zip(responses, questions):
@@ -186,7 +186,6 @@ if page == "Personality Test":
         st.subheader("Your Personality Results")
         row = [user_name]
 
-        # Explanations for score ranges
         explanations = {
             "Extraversion": [
                 (0, 39, "You are reserved and quiet, and may prefer calm environments."),
@@ -215,19 +214,32 @@ if page == "Personality Test":
             ]
         }
 
-        # Display results and explanations
+        # Show each trait and explanation
+        summary_parts = []
         for trait in traits:
             avg = round(traits[trait] / trait_counts[trait] * 20)
             st.markdown(f"**{trait}**: {avg} / 100")
+
+            # Show explanation immediately after score
             for (low, high, explanation) in explanations[trait]:
                 if low <= avg <= high:
                     st.markdown(f"→ *{explanation}*")
+                    summary_parts.append((trait, avg, explanation))
                     break
+
             row.append(avg)
 
-        # Save results to Google Sheets
+        # Generate overall personality summary
+        st.markdown("### Personality Summary")
+        summary_text = "Based on your results, you are:\n"
+        for trait, avg, exp in summary_parts:
+            level = "high" if avg >= 60 else "moderate" if avg >= 40 else "low"
+            summary_text += f"- **{trait}** ({level}): {exp}\n"
+        st.write(summary_text)
+
+        # Save results
         profile_sheet.append_row(row)
-        st.success("Saved. You can now proceed to chat.")
+        st.success("Your profile is saved! You can now proceed to the chatbot.")
         st.session_state["completed_test"] = True
 
     if st.session_state.get("completed_test", False):
@@ -251,11 +263,11 @@ if page == "Chat":
                 Before you begin chatting, I'd like to kindly ask for your help.
 
                 We're conducting a small study on how different chatbot styles affect mental wellbeing.  
-                If you're willing, **please take 1–2 minutes to answer this short anonymous form** before chatting:
+                If you're willing, please take 1–2 minutes to answer this short anonymous form before chatting:
 
                 👉 [Click here to open the form](https://forms.gle/hyAj45PPrfCxvu4J8)
 
-                This helps us understand how effective this chatbot can help people.
+                This will helps me understand how effective this chatbot can help people.
                 Thank you very much.
                 """
             )
@@ -299,14 +311,26 @@ if page == "Chat":
 
     # --- ① 30ターン後の切り替え案内 ---
     if (
-        history_len >= MAX_NONMATCH_ROUNDS and 
-        "matched_mode" not in st.session_state
+    history_len >= MAX_NONMATCH_ROUNDS and 
+    "matched_mode" not in st.session_state
     ):
         st.info("We've now learned your personality. Would you like to switch to a chatbot that better matches your traits?")
+    
+        # Show optional survey before switching
+        with st.expander("Optional Second Survey (After First Phase)"):
+            st.markdown(
+                """
+                Before switching, we'd appreciate your feedback on the first chatbot experience!  
+                👉 [Click here to answer the short survey](https://forms.gle/Z8NoMyrfBpdePJZWA)
+                """
+            )
+
         if st.button("Switch to matched chatbot"):
             st.session_state["matched_mode"] = True
             st.success("Switched to matched chatbot personality!")
             st.rerun()
+
+
 
 
     # --- ② 通常のチャット入力処理（案内の有無に関わらず実行） ---
