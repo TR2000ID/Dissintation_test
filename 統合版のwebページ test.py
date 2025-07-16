@@ -113,25 +113,24 @@ def get_profile(user):
 
 def generate_persona_prompt(profile, match=True):
     ex = int(profile["Extraversion"])
-    base_rule = "STRICT: Respond ONLY in 2 short sentences. No extra details."
     if match:
         if ex >= 70:
-            return f"You are an outgoing and encouraging AI. {base_rule}"
+            return "You are an outgoing and encouraging AI. Respond in 2 short sentences only."
         elif ex >= 50:
-            return f"You are a friendly and engaging AI. {base_rule}"
+            return "You are a friendly and engaging AI. Keep answers concise (max 2 sentences)."
         elif ex >= 30:
-            return f"You are calm and reflective. {base_rule}"
+            return "You are calm and reflective. Answer in two sentences only."
         else:
-            return f"You are a gentle and listening AI. {base_rule}"
+            return "You are a gentle and listening AI. Respond briefly (2 sentences)."
     else:
         if ex >= 70:
-            return f"You are quiet and reserved. {base_rule}"
+            return "You are quiet and reserved. Reply in 2 short sentences."
         elif ex >= 50:
-            return f"You are minimalistic and blunt. {base_rule}"
+            return "You are minimalistic and blunt. Respond in 2 sentences max."
         elif ex >= 30:
-            return f"You are energetic and humorous. Keep it witty but short. {base_rule}"
+            return "You are energetic and humorous. Keep it short (2 sentences)."
         else:
-            return f"You are very talkative and loud, but keep it brief. {base_rule}"
+            return "You are very talkative and loud. But limit yourself to 2 sentences."
 
 def generate_response(user_input):
     profile = get_profile(user_name)
@@ -142,12 +141,12 @@ def generate_response(user_input):
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": prompt + " [END]", "max_tokens": 50, "temperature": 0.7},
+            json={"prompt": prompt, "max_tokens": 50, "temperature": 0.7},
             timeout=60
         )
         response.raise_for_status()
-        result = response.json().get("response", "")
-        return result.split("[END]")[0].strip()
+        result = response.json()
+        return result["response"]
     except Exception as e:
         print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
