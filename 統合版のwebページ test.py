@@ -137,34 +137,44 @@ def generate_response(user_input):
     history_len = len(st.session_state.chat_history) // 2
     persona = get_chatbot_style(profile, history_len)
 
-    # 会話履歴をまとめる
+    # 会話履歴
     history_text = ""
-    for msg in st.session_state.chat_history[-10:]:  # 直近3往復
+    for msg in st.session_state.chat_history[-10:]:
         history_text += f"{msg['role']}: {msg['content']}\n"
+
+    # 詳細要求チェック
+    detail_flag = check_detail_request(user_input)
 
     # プロンプト構築
     prompt = (
         f"{persona} STRICT: Respond ONLY based on this conversation. "
-        f"Do NOT add unrelated topics. Respond in 2 short sentences.\n"
+        f"Default: Respond in 2 short sentences. If the user asks for details, provide a longer explanation.\n"
         f"Conversation so far:\n{history_text}\nUser: {user_input}\nAssistant:"
     )
 
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": prompt, "max_tokens": 60, "temperature": 0.3},
+            json={
+                "prompt": prompt,
+                "max_tokens": 150 if detail_flag else 60,
+                "temperature": 0.3
+            },
             timeout=60
         )
         response.raise_for_status()
         result = response.json().get("response", "")
 
-        # 強制2文制御
-        sentences = result.replace("[END]", "").strip().split('.')
-        cleaned = '. '.join([s.strip() for s in sentences[:2] if s.strip()]) + '.'
-        return cleaned
+        # 2文制御（通常モードのみ）
+        if not detail_flag:
+            sentences = result.replace("[END]", "").strip().split('.')
+            result = '. '.join([s.strip() for s in sentences[:2] if s.strip()]) + '.'
+
+        return result
     except Exception as e:
         print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
+
 
 
 
