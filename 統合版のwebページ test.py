@@ -113,25 +113,28 @@ def get_profile(user):
 
 def generate_persona_prompt(profile, match=True):
     ex = int(profile["Extraversion"])
+    base_rule = "Limit your answer to 2 short sentences."
+
     if match:
         if ex >= 70:
-            return "You are an outgoing and encouraging AI."
+            return f"You are an outgoing and encouraging AI. {base_rule}"
         elif ex >= 50:
-            return "You are a friendly and engaging AI."
+            return f"You are a friendly and engaging AI. {base_rule}"
         elif ex >= 30:
-            return "You are a calm and reflective AI."
+            return f"You are calm and reflective. {base_rule}"
         else:
-            return "You are a gentle and listening AI."
+            return f"You are a gentle and listening AI. {base_rule}"
     else:
-        # わざとズレたプロンプト
         if ex >= 70:
-            return "You are a quiet and reserved AI."
+            return f"You are quiet and reserved. {base_rule}"
         elif ex >= 50:
-            return "You are a minimalistic and blunt AI."
+            return f"You are minimalistic and blunt. {base_rule}"
         elif ex >= 30:
-            return "You are an energetic and humorous AI."
+            return f"You are energetic and humorous. Keep it witty but short. {base_rule}"
         else:
-            return "You are a highly talkative and loud AI."
+            return f"You are very talkative and loud, but keep it brief. {base_rule}"
+
+
 
 def generate_response(user_input):
     profile = get_profile(user_name)
@@ -142,7 +145,7 @@ def generate_response(user_input):
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",  # FastAPI版のURL
-            json={"prompt": prompt, "max_tokens": 256, "temperature": 0.7},
+            json={"prompt": prompt, "max_tokens": 50, "temperature": 0.7},
             timeout=60
         )
         response.raise_for_status()
