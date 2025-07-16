@@ -136,8 +136,18 @@ def generate_response(user_input):
     profile = get_profile(user_name)
     history_len = len(st.session_state.chat_history) // 2
     persona = get_chatbot_style(profile, history_len)
-    
-    prompt = f"{persona} STRICT: Answer ONLY in 2 short sentences. STOP after 2 sentences.\nUser: {user_input}\nAssistant:"
+
+    # 会話履歴をまとめる
+    history_text = ""
+    for msg in st.session_state.chat_history[-10:]:  # 直近3往復
+        history_text += f"{msg['role']}: {msg['content']}\n"
+
+    # プロンプト構築
+    prompt = (
+        f"{persona} STRICT: Respond ONLY based on this conversation. "
+        f"Do NOT add unrelated topics. Respond in 2 short sentences.\n"
+        f"Conversation so far:\n{history_text}\nUser: {user_input}\nAssistant:"
+    )
 
     try:
         response = requests.post(
@@ -148,13 +158,14 @@ def generate_response(user_input):
         response.raise_for_status()
         result = response.json().get("response", "")
 
-        # ✅ 応答を強制的に2文に制限
+        # 強制2文制御
         sentences = result.replace("[END]", "").strip().split('.')
         cleaned = '. '.join([s.strip() for s in sentences[:2] if s.strip()]) + '.'
         return cleaned
     except Exception as e:
         print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
+
 
 
 
