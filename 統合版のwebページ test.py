@@ -111,6 +111,16 @@ def get_profile(user):
             return row
     return None
 
+# Detect if the user is requesting a detailed answer 
+def check_detail_request(text):
+    keywords = [
+        "detail", "details", "explain", "explanation", "more", "expand",
+        "elaborate", "in depth", "thorough", "tell me more", "go deeper"
+    ]
+    text_lower = text.lower()
+    return any(word in text_lower for word in keywords)
+
+
 def generate_persona_prompt(profile, match=True):
     ex = int(profile["Extraversion"])
     if match:
