@@ -136,20 +136,26 @@ def generate_response(user_input):
     profile = get_profile(user_name)
     history_len = len(st.session_state.chat_history) // 2
     persona = get_chatbot_style(profile, history_len)
-    prompt = f"{persona}\nUser: {user_input}\nAssistant:"
+    
+    prompt = f"{persona} STRICT: Answer ONLY in 2 short sentences. STOP after 2 sentences.\nUser: {user_input}\nAssistant:"
 
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": prompt, "max_tokens": 50, "temperature": 0.7},
+            json={"prompt": prompt, "max_tokens": 60, "temperature": 0.3},
             timeout=60
         )
         response.raise_for_status()
-        result = response.json()
-        return result["response"]
+        result = response.json().get("response", "")
+
+        # ✅ 応答を強制的に2文に制限
+        sentences = result.replace("[END]", "").strip().split('.')
+        cleaned = '. '.join([s.strip() for s in sentences[:2] if s.strip()]) + '.'
+        return cleaned
     except Exception as e:
         print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
+
 
 
 
