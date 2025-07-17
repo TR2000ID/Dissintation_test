@@ -8,6 +8,7 @@ import requests
 import uuid
 import time
 import random
+import math
 
 # === Google Sheets 認証 ===
 creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
@@ -166,52 +167,123 @@ def generate_response(user_input):
 
 # === Personality Test ===
 if page == "Personality Test":
-    st.title("Big Five Personality Test")
-    questions = [("I make friends easily", "Extraversion", False), ("I am the life of the party", "Extraversion", False),
-                 ("I don't talk a lot", "Extraversion", True), ("I keep in the background", "Extraversion", True),
-                 ("I sympathize with others' feelings", "Agreeableness", False),
-                 ("I feel others’ emotions", "Agreeableness", False),
-                 ("I am not interested in other people's problems", "Agreeableness", True),
-                 ("I insult people", "Agreeableness", True),
-                 ("I get chores done right away", "Conscientiousness", False),
-                 ("I follow a schedule", "Conscientiousness", False),
-                 ("I often forget to put things back in their proper place", "Conscientiousness", True),
-                 ("I make a mess of things", "Conscientiousness", True),
-                 ("I am relaxed most of the time", "Emotional Stability", False),
-                 ("I seldom feel blue", "Emotional Stability", False),
-                 ("I get upset easily", "Emotional Stability", True),
-                 ("I worry about things", "Emotional Stability", True),
-                 ("I have a vivid imagination", "Openness", False), ("I am full of ideas", "Openness", False),
-                 ("I am not interested in abstract ideas", "Openness", True),
-                 ("I do not have a good imagination", "Openness", True)]
+    st.title("Big Five Personality Test (BFI-44)")
+    total_pages = 5
+    if "page" not in st.session_state: st.session_state.page = 1
+    if "responses" not in st.session_state: st.session_state.responses = []
 
-    responses = []
-    with st.form("personality_form"):
-        st.write("Rate each statement from 1 (Disagree) to 5 (Agree):")
-        for q, _, _ in questions:
-            responses.append(st.slider(q, 1, 5, 3))
-        submitted = st.form_submit_button("Submit")
+    def interpret_trait(trait, score):
+        if trait == "Extraversion":
+            return "High → Sociable and energetic" if score >= 60 else "Low → Reserved and quiet"
+        if trait == "Agreeableness":
+            return "High → Cooperative and empathetic" if score >= 60 else "Low → Independent, sometimes critical"
+        if trait == "Conscientiousness":
+            return "High → Organized and responsible" if score >= 60 else "Low → Flexible, sometimes impulsive"
+        if trait == "Emotional Stability":
+            return "High → Calm and resilient" if score >= 60 else "Low → Sensitive to stress and emotions"
+        if trait == "Openness":
+            return "High → Creative and open to new ideas" if score >= 60 else "Low → Prefers familiarity and routine"
+        return ""
+
+    # 質問セット（BFI-44）
+    bfi_questions = [
+    # Extraversion (8 items)
+    ("I see myself as someone who is talkative.", "Extraversion", False),
+    ("I see myself as someone who is reserved.", "Extraversion", True),
+    ("I see myself as someone who is full of energy.", "Extraversion", False),
+    ("I see myself as someone who generates a lot of enthusiasm.", "Extraversion", False),
+    ("I see myself as someone who tends to be quiet.", "Extraversion", True),
+    ("I see myself as someone who has an assertive personality.", "Extraversion", False),
+    ("I see myself as someone who is sometimes shy, inhibited.", "Extraversion", True),
+    ("I see myself as someone who is outgoing, sociable.", "Extraversion", False),
+
+    # Agreeableness (9 items)
+    ("I see myself as someone who is helpful and unselfish with others.", "Agreeableness", False),
+    ("I see myself as someone who starts quarrels with others.", "Agreeableness", True),
+    ("I see myself as someone who has a forgiving nature.", "Agreeableness", False),
+    ("I see myself as someone who is generally trusting.", "Agreeableness", False),
+    ("I see myself as someone who can be cold and aloof.", "Agreeableness", True),
+    ("I see myself as someone who is considerate and kind to almost everyone.", "Agreeableness", False),
+    ("I see myself as someone who is sometimes rude to others.", "Agreeableness", True),
+    ("I see myself as someone who likes to cooperate with others.", "Agreeableness", False),
+    ("I see myself as someone who tends to find fault with others.", "Agreeableness", True),
+
+    # Conscientiousness (9 items)
+    ("I see myself as someone who does a thorough job.", "Conscientiousness", False),
+    ("I see myself as someone who tends to be lazy.", "Conscientiousness", True),
+    ("I see myself as someone who is a reliable worker.", "Conscientiousness", False),
+    ("I see myself as someone who does things efficiently.", "Conscientiousness", False),
+    ("I see myself as someone who makes plans and follows through with them.", "Conscientiousness", False),
+    ("I see myself as someone who tends to be disorganized.", "Conscientiousness", True),
+    ("I see myself as someone who is easily distracted.", "Conscientiousness", True),
+    ("I see myself as someone who is persistent and works until the task is finished.", "Conscientiousness", False),
+    ("I see myself as someone who is careful and pays attention to details.", "Conscientiousness", False),
+
+    # Neuroticism / Emotional Stability (8 items)
+    ("I see myself as someone who is depressed, blue.", "Emotional Stability", True),
+    ("I see myself as someone who can be tense.", "Emotional Stability", True),
+    ("I see myself as someone who worries a lot.", "Emotional Stability", True),
+    ("I see myself as someone who remains calm in tense situations.", "Emotional Stability", False),
+    ("I see myself as someone who is emotionally stable, not easily upset.", "Emotional Stability", False),
+    ("I see myself as someone who gets nervous easily.", "Emotional Stability", True),
+    ("I see myself as someone who can be moody.", "Emotional Stability", True),
+    ("I see myself as someone who handles stress well.", "Emotional Stability", False),
+
+    # Openness to Experience (10 items)
+    ("I see myself as someone who is original, comes up with new ideas.", "Openness", False),
+    ("I see myself as someone who is curious about many different things.", "Openness", False),
+    ("I see myself as someone who is ingenious, a deep thinker.", "Openness", False),
+    ("I see myself as someone who has an active imagination.", "Openness", False),
+    ("I see myself as someone who is inventive.", "Openness", False),
+    ("I see myself as someone who values artistic, aesthetic experiences.", "Openness", False),
+    ("I see myself as someone who prefers work that is routine.", "Openness", True),
+    ("I see myself as someone who likes to reflect and play with ideas.", "Openness", False),
+    ("I see myself as someone who has few artistic interests.", "Openness", True),
+    ("I see myself as someone who is sophisticated in art, music, or literature.", "Openness", False)
+]
+
+    per_page = math.ceil(len(bfi_questions) / total_pages)
+    start = (st.session_state.page - 1) * per_page
+    end = start + per_page
+
+    with st.form(f"personality_form_{st.session_state.page}"):
+        page_responses = []
+        for q, _, _ in bfi_questions[start:end]:
+            page_responses.append(st.slider(q, 1, 5, 3))
+        submitted = st.form_submit_button("Next" if st.session_state.page < total_pages else "Submit")
 
     if submitted:
-        traits = {t: 0 for _, t, _ in questions}
-        trait_counts = {t: 0 for t in traits}
-        for r, (q, t, rev) in zip(responses, questions):
-            traits[t] += 6 - r if rev else r
-            trait_counts[t] += 1
-        row = [
-            user_name,
-            st.session_state.session_id,
-            st.session_state.experiment_condition,
-            round(traits["Extraversion"] / trait_counts["Extraversion"] * 20),
-            round(traits["Agreeableness"] / trait_counts["Agreeableness"] * 20),
-            round(traits["Conscientiousness"] / trait_counts["Conscientiousness"] * 20),
-            round(traits["Emotional Stability"] / trait_counts["Emotional Stability"] * 20),
-            round(traits["Openness"] / trait_counts["Openness"] * 20)
-        ]
+        st.session_state.responses.extend(page_responses)
+        if st.session_state.page < total_pages:
+            st.session_state.page += 1
+        else:
+            # スコア計算
+            traits = {t: 0 for _, t, _ in bfi_questions}
+            trait_counts = {t: 0 for t in traits}
+            for r, (q, t, rev) in zip(st.session_state.responses, bfi_questions):
+                score = 6 - r if rev else r
+                traits[t] += score
+                trait_counts[t] += 1
 
-        safe_append(profile_sheet, row)
-        st.success("Profile saved! You can now proceed to chat.")
-        st.session_state["completed_test"] = True
+            scores = {t: round((traits[t] / trait_counts[t]) * 20) for t in traits}
+            responses_json = json.dumps(dict(zip([q for q, _, _ in bfi_questions], st.session_state.responses)))
+
+            row = [
+                user_name,
+                st.session_state.session_id,
+                st.session_state.experiment_condition,
+                scores["Extraversion"], scores["Agreeableness"], scores["Conscientiousness"],
+                scores["Emotional Stability"], scores["Openness"],
+                responses_json
+            ]
+            safe_append(profile_sheet, row)
+
+            # 結果表示
+            st.success("Profile saved!")
+            st.write("Your Personality Scores:", scores)
+            st.write("Interpretation:")
+            for trait, score in scores.items():
+                st.write(f"{trait}: {interpret_trait(trait, score)}")
 
 if page == "Chat":
     st.title(f"Chatbot - {user_name}")
