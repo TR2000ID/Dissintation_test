@@ -230,40 +230,32 @@ if page == "Chat":
     user_input = st.chat_input("Your message")
 
     if user_input:
-        # 1. インデックス更新
         st.session_state.turn_index += 1
-
-        # 2. タイムスタンプ取得
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        # 3. AI応答生成
         ai_reply = generate_response(user_input)
-
-        # 4. チャット履歴に追加
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
-        # 5. シート取得 or 作成（Match / NoMatch別タブ）
+        # 個別タブ
         tab_name = f"{user_name}_{'Match' if st.session_state['matched_mode'] else 'NoMatch'}"
         user_sheet = get_or_create_worksheet(spreadsheet, tab_name)
 
-        # 6. ユーザー発話ログ
-        safe_append(user_sheet, [
-            st.session_state.session_id, user_name, "user", user_input, now,
-            st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
-            profile.get("Extraversion"), profile.get("Agreeableness"), profile.get("Conscientiousness"),
-            profile.get("Emotional Stability"), profile.get("Openness")
-        ])
+        # 個別ログ＋共通ログ
+        for role, message in [("user", user_input), ("bot", ai_reply)]:
+            safe_append(user_sheet, [
+                st.session_state.session_id, user_name, role, message, now,
+                st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
+                profile.get("Extraversion", ""), profile.get("Agreeableness", ""), profile.get("Conscientiousness", ""),
+                profile.get("Emotional Stability", ""), profile.get("Openness", "")
+            ])
+            safe_append(chat_sheet, [
+                st.session_state.session_id, user_name, role, message, now,
+                st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
+                profile.get("Extraversion", ""), profile.get("Agreeableness", ""), profile.get("Conscientiousness", ""),
+                profile.get("Emotional Stability", ""), profile.get("Openness", "")
+            ])
 
-        # 7. AI応答ログ
-        safe_append(user_sheet, [
-            st.session_state.session_id, user_name, "bot", ai_reply, now,
-            st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
-            profile.get("Extraversion"), profile.get("Agreeableness"), profile.get("Conscientiousness"),
-            profile.get("Emotional Stability"), profile.get("Openness")
-        ])
-
-    # チャット履歴表示
+    # チャット履歴を常に表示
     for msg in st.session_state.chat_history:
         st.chat_message(msg["role"].lower()).write(msg["content"])
 
