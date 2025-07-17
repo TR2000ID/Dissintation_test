@@ -177,7 +177,7 @@ if page == "Personality Test":
         for r, (q, t, rev) in zip(responses, questions):
             traits[t] += 6 - r if rev else r
             trait_counts[t] += 1
-        row = [user_name] + [round(traits[t] / trait_counts[t] * 20) for t in traits]
+        row = [user_name, st.session_state.session_id, st.session_state.experiment_condition] + [round(traits[t] / trait_counts[t] * 20) for t in traits]
         safe_append(profile_sheet, row)
         st.success("Profile saved! You can now proceed to chat.")
         st.session_state["completed_test"] = True
@@ -199,7 +199,7 @@ if page == "Chat":
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
-        # === ユーザー発話ログ ===
+    # === ユーザー発話ログ ===
     safe_append(chat_sheet, [
         st.session_state.session_id,
         user_name,"user",
@@ -226,6 +226,7 @@ if page == "Chat":
         profile.get("Emotional Stability"),
         profile.get("Openness")
     ])
+
 
 
     for msg in st.session_state.chat_history:
