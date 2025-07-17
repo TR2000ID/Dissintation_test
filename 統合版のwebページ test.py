@@ -162,7 +162,7 @@ def generate_response(user_input):
         sentences = result.replace("[END]", "").strip().split('.')
         return '. '.join(s.strip() for s in sentences[:2] if s.strip()) + '.'
     except Exception as e:
-        return "Sorry, the assistant is currently unavailable."
+        return "Sorry, the assistant is currently unavailable. please try entering one more time. If that doesn't work contact Ryosuke Komatsu to look into the issue."
 
 # === Personality Test ===
 if page == "Personality Test":
