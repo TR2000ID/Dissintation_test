@@ -5,6 +5,9 @@ import tempfile
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
+import uuid
+import time
+import random
 
 # === Google Sheets 認証 ===
 creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
@@ -18,76 +21,12 @@ scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
 client = gspread.authorize(credentials)
 
-# === Google Sheets 接続 ===
-chat_sheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM").worksheet("Chat")
-profile_sheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM").worksheet("Personality")
+spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
+chat_sheet = spreadsheet.worksheet("Chat")
+profile_sheet = spreadsheet.worksheet("Personality")
 existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
 
-
-# === ユーザー認証（サイドバー）===
-if "user_name" not in st.session_state:
-    st.session_state.user_name = ""
-
-if st.session_state.user_name == "":
-    st.session_state.user_name = st.sidebar.text_input("Enter your username")
-    if not st.session_state.user_name:
-        st.warning("Please enter your username.")
-        st.stop()
-else:
-    st.sidebar.markdown(f"**Welcome, {st.session_state.user_name}!**")
-
-user_name = st.session_state.user_name
-
-page = "Chat" if user_name in existing_users else "Personality Test"
-
-# === ユーザー専用のチャットシートを取得 or 作成 ===
-spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
-
-# === ユーザー専用のログシート：不一致・一致 で分離 ===
-try:
-    mismatch_sheet = spreadsheet.worksheet(f"{user_name}_nonmatch")
-except gspread.exceptions.WorksheetNotFound:
-    mismatch_sheet = spreadsheet.add_worksheet(title=f"{user_name}_nonmatch", rows="1000", cols="4")
-    mismatch_sheet.append_row(["Username", "Role", "Message", "Timestamp"])
-
-try:
-    match_sheet = spreadsheet.worksheet(f"{user_name}_match")
-except gspread.exceptions.WorksheetNotFound:
-    match_sheet = spreadsheet.add_worksheet(title=f"{user_name}_match", rows="1000", cols="4")
-    match_sheet.append_row(["Username", "Role", "Message", "Timestamp"])
-
-
-
-# === 質問リスト20問版 ===
-questions = [
-    ("I make friends easily", "Extraversion", False),
-    ("I am the life of the party", "Extraversion", False),
-    ("I don't talk a lot", "Extraversion", True),
-    ("I keep in the background", "Extraversion", True),
-
-    ("I sympathize with others' feelings", "Agreeableness", False),
-    ("I feel others’ emotions", "Agreeableness", False),
-    ("I am not interested in other people's problems", "Agreeableness", True),
-    ("I insult people", "Agreeableness", True),
-
-    ("I get chores done right away", "Conscientiousness", False),
-    ("I follow a schedule", "Conscientiousness", False),
-    ("I often forget to put things back in their proper place", "Conscientiousness", True),
-    ("I make a mess of things", "Conscientiousness", True),
-
-    ("I am relaxed most of the time", "Emotional Stability", False),
-    ("I seldom feel blue", "Emotional Stability", False),
-    ("I get upset easily", "Emotional Stability", True),
-    ("I worry about things", "Emotional Stability", True),
-
-    ("I have a vivid imagination", "Openness", False),
-    ("I am full of ideas", "Openness", False),
-    ("I am not interested in abstract ideas", "Openness", True),
-    ("I do not have a good imagination", "Openness", True)
-]
-
 # === ユーザー認証 ===
-st.sidebar.title("User Login")
 if "user_name" not in st.session_state:
     st.session_state.user_name = ""
 
@@ -102,111 +41,130 @@ else:
 user_name = st.session_state.user_name
 page = "Chat" if user_name in existing_users else "Personality Test"
 
-# === 心理テスト ===
+# === セッション管理 ===
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
+if "turn_index" not in st.session_state:
+    st.session_state.turn_index = 0
+
+if "experiment_condition" not in st.session_state:
+    st.session_state.experiment_condition = random.choice(["Fixed Empathy", "Personalized Empathy"])
+
+if "matched_mode" not in st.session_state:
+    st.session_state["matched_mode"] = False
+
+# === エラーハンドリング付きGoogle Sheets書き込み ===
+def safe_append(sheet, row, retries=3, delay=2):
+    for i in range(retries):
+        try:
+            sheet.append_row(row)
+            return
+        except gspread.exceptions.APIError:
+            time.sleep(delay * (i + 1))
+    st.error("Failed to log data after multiple retries.")
+
+# === パラメータ ===
 MAX_NONMATCH_ROUNDS = 30
 
+# === Big Five結果取得 ===
 def get_profile(user):
     for row in profile_sheet.get_all_records():
         if row["Username"] == user:
             return row
     return None
 
-# Detect if the user is requesting a detailed answer 
-def check_detail_request(text):
-    keywords = [
-        "detail", "details", "explain", "explanation", "more", "expand",
-        "elaborate", "in depth", "thorough", "tell me more", "go deeper"
-    ]
-    text_lower = text.lower()
-    return any(word in text_lower for word in keywords)
-
-
+# === Personaプロンプト生成 ===
 def generate_persona_prompt(profile, match=True):
-    ex = int(profile["Extraversion"])
-    if match:
-        if ex >= 70:
-            return "You are an outgoing and encouraging AI. Respond in 2 short sentences only."
-        elif ex >= 50:
-            return "You are a friendly and engaging AI. Keep answers concise (max 2 sentences)."
-        elif ex >= 30:
-            return "You are calm and reflective. Answer in two sentences only."
-        else:
-            return "You are a gentle and listening AI. Respond briefly (2 sentences)."
-    else:
-        if ex >= 70:
-            return "You are quiet and reserved. Reply in 2 short sentences."
-        elif ex >= 50:
-            return "You are minimalistic and blunt. Respond in 2 sentences max."
-        elif ex >= 30:
-            return "You are energetic and humorous. Keep it short (2 sentences)."
-        else:
-            return "You are very talkative and loud. But limit yourself to 2 sentences."
+    ex = int(profile.get("Extraversion", 50))
+    ag = int(profile.get("Agreeableness", 50))
+    es = int(profile.get("Emotional Stability", 50))
+    op = int(profile.get("Openness", 50))
+    co = int(profile.get("Conscientiousness", 50))
 
+    # Fixed Empathy condition
+    if st.session_state.experiment_condition == "Fixed Empathy":
+        style = random.choice(["Counselor", "Casual"])
+        if style == "Counselor":
+            return ("You are a professional counselor. Always structure your answer exactly as: "
+                    "(1) Empathy, (2) Reflective Question?, (3) Practical Suggestion. "
+                    "Example: 'I understand how hard this feels. How do you usually cope with stress? "
+                    "One idea is to break tasks into smaller steps.' "
+                    "Keep responses concise (max 2 sentences unless user requests more).")
+
+        else:
+            return ("You are a friendly and casual friend. Use this flow: "
+                    "Empathy. Light humor. Suggestion. "
+                    "Keep it short (max 2 sentences).")
+
+    # Personalized (Match or Non-Match)
+    if match:
+        empathy = "Show deep empathy warmly." if ag >= 60 else "Show light empathy with practicality."
+        reassurance = "Offer reassurance often." if es < 40 else "Encourage optimism gently."
+        tone = "Be highly energetic and positive." if ex >= 70 else "Be calm and steady."
+        creativity = "Use creative, imaginative examples." if op >= 60 else "Stay practical and simple."
+        structure = "Give structured advice." if co >= 60 else "Keep advice flexible and simple."
+    else:
+        empathy = "Respond with minimal empathy, blunt and factual."
+        reassurance = "Do not offer emotional reassurance."
+        tone = "Keep tone cold and detached. Do not ask questions."
+        creativity = "Avoid creativity; stay rigid."
+        structure = "Avoid giving structured advice."
+
+    return (f"You are an AI assistant. {empathy} {reassurance} {tone} {creativity} {structure} "
+            f"Respond in 2 short sentences unless asked for details.")
+
+
+# === 応答生成 ===
 def generate_response(user_input):
     profile = get_profile(user_name)
     history_len = len(st.session_state.chat_history) // 2
-    persona = get_chatbot_style(profile, history_len)
+    if not st.session_state["matched_mode"] and history_len >= MAX_NONMATCH_ROUNDS:
+        st.session_state["matched_mode"] = True
 
-    # 会話履歴
-    history_text = ""
-    for msg in st.session_state.chat_history[-10:]:
-        history_text += f"{msg['role']}: {msg['content']}\n"
-
-    # 詳細要求チェック
-    detail_flag = check_detail_request(user_input)
-
-    # プロンプト構築
-    prompt = (
-        f"{persona} STRICT: Respond ONLY based on this conversation. "
-        f"Default: Respond in 2 short sentences. If the user asks for details, provide a longer explanation.\n"
-        f"Conversation so far:\n{history_text}\nUser: {user_input}\nAssistant:"
-    )
+    persona = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
+    prompt = (f"EXPERIMENT CONDITION: {st.session_state.experiment_condition}, "
+              f"MATCH: {st.session_state['matched_mode']}\n"
+              f"{persona}\nUser: {user_input}\nAssistant:")
 
     try:
+        detail_flag = any(kw in user_input.lower() for kw in ["tell me more", "explain", "more detail"])
+        max_tokens = 150 if detail_flag else 80
+        
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={
-                "prompt": prompt,
-                "max_tokens": 150 if detail_flag else 60,
-                "temperature": 0.3
-            },
+            json={"prompt": prompt, "max_tokens": max_tokens, "temperature": 0.7},
             timeout=60
         )
-        response.raise_for_status()
         result = response.json().get("response", "")
-
-        # 2文制御（通常モードのみ）
-        if not detail_flag:
-            sentences = result.replace("[END]", "").strip().split('.')
-            result = '. '.join([s.strip() for s in sentences[:2] if s.strip()]) + '.'
-
-        return result
+        # 応答を2文に制御
+        sentences = result.replace("[END]", "").strip().split('.')
+        return '. '.join(s.strip() for s in sentences[:2] if s.strip()) + '.'
     except Exception as e:
-        print("Error:", e)
         return "Sorry, the assistant is currently unavailable."
 
-
-
-
-
-
-
-def get_chatbot_style(profile, history_len):
-    # マッチがTrueなら性格が一致しているチャットボットにする
-    if st.session_state.get("matched_mode", False):
-        return generate_persona_prompt(profile, match=True)
-    
-    # わざと真逆の性格のチャットボットにする（最初の30ターン）
-    if history_len < MAX_NONMATCH_ROUNDS:
-        return generate_persona_prompt(profile, match=False)
-    
-    # 30ターンを超えても未切替（案内済みで保留中）
-    return generate_persona_prompt(profile, match=False)
-
+# === Personality Test ===
 if page == "Personality Test":
     st.title("Big Five Personality Test")
-    responses = []
+    questions = [("I make friends easily", "Extraversion", False), ("I am the life of the party", "Extraversion", False),
+                 ("I don't talk a lot", "Extraversion", True), ("I keep in the background", "Extraversion", True),
+                 ("I sympathize with others' feelings", "Agreeableness", False),
+                 ("I feel others’ emotions", "Agreeableness", False),
+                 ("I am not interested in other people's problems", "Agreeableness", True),
+                 ("I insult people", "Agreeableness", True),
+                 ("I get chores done right away", "Conscientiousness", False),
+                 ("I follow a schedule", "Conscientiousness", False),
+                 ("I often forget to put things back in their proper place", "Conscientiousness", True),
+                 ("I make a mess of things", "Conscientiousness", True),
+                 ("I am relaxed most of the time", "Emotional Stability", False),
+                 ("I seldom feel blue", "Emotional Stability", False),
+                 ("I get upset easily", "Emotional Stability", True),
+                 ("I worry about things", "Emotional Stability", True),
+                 ("I have a vivid imagination", "Openness", False), ("I am full of ideas", "Openness", False),
+                 ("I am not interested in abstract ideas", "Openness", True),
+                 ("I do not have a good imagination", "Openness", True)]
 
+    responses = []
     with st.form("personality_form"):
         st.write("Rate each statement from 1 (Disagree) to 5 (Agree):")
         for q, _, _ in questions:
@@ -214,174 +172,73 @@ if page == "Personality Test":
         submitted = st.form_submit_button("Submit")
 
     if submitted:
-        #心理テストのスコアを計算
         traits = {t: 0 for _, t, _ in questions}
         trait_counts = {t: 0 for t in traits}
         for r, (q, t, rev) in zip(responses, questions):
             traits[t] += 6 - r if rev else r
             trait_counts[t] += 1
-
-        st.subheader("Your Personality Results")
-        row = [user_name]
-
-        explanations = {
-            "Extraversion": [
-                (0, 39, "You are reserved and quiet, and may prefer calm environments."),
-                (40, 59, "You are balanced between social and quiet settings."),
-                (60, 100, "You are energetic, outgoing, and enjoy social interactions.")
-            ],
-            "Agreeableness": [
-                (0, 39, "You tend to be more direct and assertive in your opinions."),
-                (40, 59, "You generally get along with others, but also value fairness."),
-                (60, 100, "You are caring, cooperative, and sensitive to others’ needs.")
-            ],
-            "Conscientiousness": [
-                (0, 39, "You may be spontaneous and flexible, but sometimes disorganized."),
-                (40, 59, "You are reasonably organized and goal-focused."),
-                (60, 100, "You are highly responsible, detail-oriented, and self-disciplined.")
-            ],
-            "Emotional Stability": [
-                (0, 39, "You may experience mood swings or stress more easily."),
-                (40, 59, "You have moderate emotional resilience."),
-                (60, 100, "You remain calm and composed, even under pressure.")
-            ],
-            "Openness": [
-                (0, 39, "You tend to prefer routine and practicality over novelty."),
-                (40, 59, "You are moderately open to new ideas and experiences."),
-                (60, 100, "You are imaginative, curious, and open to creative thinking.")
-            ]
-        }
-
-        # Show each trait and explanation
-        summary_parts = []
-        for trait in traits:
-            avg = round(traits[trait] / trait_counts[trait] * 20)
-            st.markdown(f"**{trait}**: {avg} / 100")
-
-            # Show explanation immediately after score
-            for (low, high, explanation) in explanations[trait]:
-                if low <= avg <= high:
-                    st.markdown(f"→ *{explanation}*")
-                    summary_parts.append((trait, avg, explanation))
-                    break
-
-            row.append(avg)
-
-        # Generate overall personality summary
-        st.markdown("### Personality Summary")
-        summary_text = "Based on your results, you are:\n"
-        for trait, avg, exp in summary_parts:
-            level = "high" if avg >= 60 else "moderate" if avg >= 40 else "low"
-            summary_text += f"- **{trait}** ({level}): {exp}\n"
-        st.write(summary_text)
-
-        # Save results
-        profile_sheet.append_row(row)
-        st.success("Your profile is saved! You can now proceed to the chatbot.")
+        row = [user_name] + [round(traits[t] / trait_counts[t] * 20) for t in traits]
+        safe_append(profile_sheet, row)
+        st.success("Profile saved! You can now proceed to chat.")
         st.session_state["completed_test"] = True
 
-    if st.session_state.get("completed_test", False):
-        if st.button("Go to Chat"):
-            st.rerun()
-
-
-
 if page == "Chat":
-    if "matched_mode" not in st.session_state:
-        st.session_state["matched_mode"] = False
-
     st.title(f"Chatbot - {user_name}")
-
-        # --- アンケート案内（最初の1回だけ表示） ---
-    if "questionnaire_shown" not in st.session_state:
-        st.session_state["questionnaire_shown"] = True  # 表示済みにする
-        with st.expander("Optional Survey Request"):
-            st.markdown(
-                """
-                Before you begin chatting, I'd like to kindly ask for your help.
-
-                We're conducting a small study on how different chatbot styles affect mental wellbeing.  
-                If you're willing, please take 1–2 minutes to answer this short anonymous form before chatting:
-
-                👉 [Click here to open the form](https://forms.gle/hyAj45PPrfCxvu4J8)
-
-                This will helps me understand how effective this chatbot can help people.
-                Thank you very much.
-                """
-            )
-
-
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
     profile = get_profile(user_name)
     if not profile:
         st.error("No profile found. Please take the test first.")
         st.stop()
 
-    if "persona_prompt" not in st.session_state:
-        st.session_state.persona_prompt = generate_persona_prompt(profile)
-
-    if "chat_history" not in st.session_state:
-        # === 初回のみ：Google Sheets からチャット履歴をロード ===
-        chat_history = []
-        rows = chat_sheet.get_all_values()[1:]  # ヘッダー除外
-        for row in rows:
-            name, role, message, _ = row
-            if name == user_name:
-                chat_history.append({"role": role, "content": message})
-        st.session_state.chat_history = chat_history
-
-    history_len = len(st.session_state.chat_history) // 2  # 1往復＝2行
-
-    for msg in st.session_state.chat_history:
-        role = msg["role"].lower()
-        bubble_color = "#DCF8C6" if role == "user" else "#E8E8E8"
-    
-        with st.chat_message(role):
-            st.markdown(
-                f"""
-                <div style="background-color: {bubble_color}; color:black; padding: 10px; border-radius: 10px; max-width: 90%; word-wrap: break-word;">
-                    {msg['content']}
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-
-
-    # --- ① 30ターン後の切り替え案内 ---
-    if (
-    history_len >= MAX_NONMATCH_ROUNDS and 
-    "matched_mode" not in st.session_state
-    ):
-        st.info("We've now learned your personality. Would you like to switch to a chatbot that better matches your traits?")
-    
-        # Show optional survey before switching
-        with st.expander("Optional Second Survey (After First Phase)"):
-            st.markdown(
-                """
-                Before switching, we'd appreciate your feedback on the first chatbot experience!  
-                👉 [Click here to answer the short survey](https://forms.gle/Z8NoMyrfBpdePJZWA)
-                """
-            )
-
-        if st.button("Switch to matched chatbot"):
-            st.session_state["matched_mode"] = True
-            st.success("Switched to matched chatbot personality!")
-            st.rerun()
-
-
-
-
-    # --- ② 通常のチャット入力処理（案内の有無に関わらず実行） ---
     user_input = st.chat_input("Your message")
     if user_input:
+        st.session_state.turn_index += 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        st.session_state.chat_history.append({"role": "User", "content": user_input})
         ai_reply = generate_response(user_input)
+        st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
-        log_sheet = match_sheet if st.session_state.get("matched_mode", False) else mismatch_sheet
-        log_sheet.append_row([user_name, "user", user_input, now])
-        log_sheet.append_row([user_name, "bot", ai_reply, now])
+        # === ユーザー発話ログ ===
+    safe_append(chat_sheet, [
+        st.session_state.session_id,
+        user_name,"user",
+        user_input,now,
+        st.session_state["experiment_condition"],
+        st.session_state.get("matched_mode", False),
+        profile.get("Extraversion"),
+        profile.get("Agreeableness"),
+        profile.get("Conscientiousness"),
+        profile.get("Emotional Stability"),
+        profile.get("Openness")
+    ])
 
-        st.rerun()
+    # === AI応答ログ ===
+    safe_append(chat_sheet, [
+        st.session_state.session_id,
+        user_name,"bot",
+        ai_reply,now,
+        st.session_state["experiment_condition"],
+        st.session_state.get("matched_mode", False),
+        profile.get("Extraversion"),
+        profile.get("Agreeableness"),
+        profile.get("Conscientiousness"),
+        profile.get("Emotional Stability"),
+        profile.get("Openness")
+    ])
 
+
+    for msg in st.session_state.chat_history:
+        st.chat_message(msg["role"].lower()).write(msg["content"])
+
+# === Admin Debug Panel ===
+if user_name.lower() == "admin":
+    st.sidebar.markdown("### Debug Panel")
+    st.sidebar.write(f"Your Condition: {st.session_state['experiment_condition']}")
+    st.sidebar.write(f"Match Mode: {st.session_state.get('matched_mode', False)}")
+    
+    # 追加: 全ユーザー一覧表示
+    st.sidebar.subheader("All Users")
+    all_profiles = profile_sheet.get_all_records()
+    for p in all_profiles:
+        st.sidebar.write(f"{p['Username']} | Condition: {p.get('ExperimentCondition', 'N/A')} | Match: {p.get('MatchMode', 'N/A')}")
