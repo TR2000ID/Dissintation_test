@@ -198,12 +198,17 @@ if page == "Personality Test":
         for r, (q, t, rev) in zip(responses, questions):
             traits[t] += 6 - r if rev else r
             trait_counts[t] += 1
-        row = [user_name, st.session_state.session_id, st.session_state.experiment_condition, 
-               round(traits)["Extraversion"]/trait_counts["Extraversion"] *20 ,
-               round(traits["Agreeableness"]/trait_counts["Agreeableness"]*20),
-               round(traits["Conscientiousness"]/trait_counts["Conscientiousness"]*20),
-               round(traits["Emotional Stability"]/trait_counts["Emotional Stability"]*20),
-               round(traits["Openn  ess"]/trait_counts["Openness"]*20),]
+        row = [
+            user_name,
+            st.session_state.session_id,
+            st.session_state.experiment_condition,
+            round(traits["Extraversion"] / trait_counts["Extraversion"] * 20),
+            round(traits["Agreeableness"] / trait_counts["Agreeableness"] * 20),
+            round(traits["Conscientiousness"] / trait_counts["Conscientiousness"] * 20),
+            round(traits["Emotional Stability"] / trait_counts["Emotional Stability"] * 20),
+            round(traits["Openness"] / trait_counts["Openness"] * 20)
+        ]
+
         safe_append(profile_sheet, row)
         st.success("Profile saved! You can now proceed to chat.")
         st.session_state["completed_test"] = True
