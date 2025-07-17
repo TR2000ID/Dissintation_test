@@ -64,6 +64,27 @@ def safe_append(sheet, row, retries=3, delay=2):
             time.sleep(delay * (i + 1))
     st.error("Failed to log data after multiple retries.")
 
+def get_or_create_worksheet(spreadsheet, title, rows=100, cols=20):
+    """
+    指定したタイトルのワークシートが存在すれば取得し、
+    存在しなければ新規作成してヘッダー行を追加する。
+    """
+    try:
+        # 既存のシートを取得
+        return spreadsheet.worksheet(title)
+    except gspread.WorksheetNotFound:
+        # シートがなければ作成
+        ws = spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
+        # ヘッダー行を追加
+        ws.append_row([
+            "SessionID", "Username", "Role", "Message", "Timestamp",
+            "ExperimentCondition", "MatchedMode",
+            "Extraversion", "Agreeableness", "Conscientiousness",
+            "Emotional Stability", "Openness"
+        ])
+        return ws
+
+
 # === パラメータ ===
 MAX_NONMATCH_ROUNDS = 30
 
@@ -196,6 +217,8 @@ if page == "Chat":
         st.error("No profile found. Please take the test first.")
         st.stop()
 
+    
+
     user_input = st.chat_input("Your message")
     if user_input:
         st.session_state.turn_index += 1
@@ -204,11 +227,14 @@ if page == "Chat":
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
+    # --- シート取得または作成 ---
+    tab_name = f"{user_name}_{'Match' if st.session_state['matched_mode'] else 'NoMatch'}"
+    user_sheet = get_or_create_worksheet(spreadsheet, tab_name)
+
     # === ユーザー発話ログ ===
-    safe_append(chat_sheet, [
+    safe_append(user_sheet, [
         st.session_state.session_id,
-        user_name,"user",
-        user_input,now,
+        user_name, "user", user_input, now,
         st.session_state["experiment_condition"],
         st.session_state.get("matched_mode", False),
         profile.get("Extraversion"),
@@ -218,11 +244,10 @@ if page == "Chat":
         profile.get("Openness")
     ])
 
-    # === AI応答ログ ===
-    safe_append(chat_sheet, [
+    #   === AI応答ログ ===
+    safe_append(user_sheet, [
         st.session_state.session_id,
-        user_name,"bot",
-        ai_reply,now,
+        user_name, "bot", ai_reply, now,
         st.session_state["experiment_condition"],
         st.session_state.get("matched_mode", False),
         profile.get("Extraversion"),
@@ -231,6 +256,7 @@ if page == "Chat":
         profile.get("Emotional Stability"),
         profile.get("Openness")
     ])
+
 
 
 
