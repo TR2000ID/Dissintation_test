@@ -215,58 +215,58 @@ if page == "Personality Test":
 
 if page == "Chat":
     st.title(f"Chatbot - {user_name}")
+
+    # チャット履歴初期化
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+
+    # ユーザープロフィール取得
     profile = get_profile(user_name)
     if not profile:
         st.error("No profile found. Please take the test first.")
         st.stop()
 
-    
-
+    # ユーザー入力受付
     user_input = st.chat_input("Your message")
+
     if user_input:
+        # 1. インデックス更新
         st.session_state.turn_index += 1
+
+        # 2. タイムスタンプ取得
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        # 3. AI応答生成
         ai_reply = generate_response(user_input)
+
+        # 4. チャット履歴に追加
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
-    # --- シート取得または作成 ---
-    tab_name = f"{user_name}_{'Match' if st.session_state['matched_mode'] else 'NoMatch'}"
-    user_sheet = get_or_create_worksheet(spreadsheet, tab_name)
+        # 5. シート取得 or 作成（Match / NoMatch別タブ）
+        tab_name = f"{user_name}_{'Match' if st.session_state['matched_mode'] else 'NoMatch'}"
+        user_sheet = get_or_create_worksheet(spreadsheet, tab_name)
 
-    # === ユーザー発話ログ ===
-    safe_append(user_sheet, [
-        st.session_state.session_id,
-        user_name, "user", user_input, now,
-        st.session_state["experiment_condition"],
-        st.session_state.get("matched_mode", False),
-        profile.get("Extraversion"),
-        profile.get("Agreeableness"),
-        profile.get("Conscientiousness"),
-        profile.get("Emotional Stability"),
-        profile.get("Openness")
-    ])
+        # 6. ユーザー発話ログ
+        safe_append(user_sheet, [
+            st.session_state.session_id, user_name, "user", user_input, now,
+            st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
+            profile.get("Extraversion"), profile.get("Agreeableness"), profile.get("Conscientiousness"),
+            profile.get("Emotional Stability"), profile.get("Openness")
+        ])
 
-    #   === AI応答ログ ===
-    safe_append(user_sheet, [
-        st.session_state.session_id,
-        user_name, "bot", ai_reply, now,
-        st.session_state["experiment_condition"],
-        st.session_state.get("matched_mode", False),
-        profile.get("Extraversion"),
-        profile.get("Agreeableness"),
-        profile.get("Conscientiousness"),
-        profile.get("Emotional Stability"),
-        profile.get("Openness")
-    ])
+        # 7. AI応答ログ
+        safe_append(user_sheet, [
+            st.session_state.session_id, user_name, "bot", ai_reply, now,
+            st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
+            profile.get("Extraversion"), profile.get("Agreeableness"), profile.get("Conscientiousness"),
+            profile.get("Emotional Stability"), profile.get("Openness")
+        ])
 
-
-
-
+    # チャット履歴表示
     for msg in st.session_state.chat_history:
         st.chat_message(msg["role"].lower()).write(msg["content"])
+
 
 # === Admin Debug Panel ===
 if user_name.lower() == "admin":
