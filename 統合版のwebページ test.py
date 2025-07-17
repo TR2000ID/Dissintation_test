@@ -285,6 +285,11 @@ if page == "Personality Test":
             for trait, score in scores.items():
                 st.write(f"{trait}: {interpret_trait(trait, score)}")
 
+            #チャット画面に進む用のボタン
+            if st.button("Proceed to Chat"):
+                page = "Chat"
+                st.experimental_rerun()
+
 if page == "Chat":
     st.title(f"Chatbot - {user_name}")
 
