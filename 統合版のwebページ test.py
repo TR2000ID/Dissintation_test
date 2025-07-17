@@ -177,7 +177,12 @@ if page == "Personality Test":
         for r, (q, t, rev) in zip(responses, questions):
             traits[t] += 6 - r if rev else r
             trait_counts[t] += 1
-        row = [user_name, st.session_state.session_id, st.session_state.experiment_condition] + [round(traits[t] / trait_counts[t] * 20) for t in traits]
+        row = [user_name, st.session_state.session_id, st.session_state.experiment_condition, 
+               round(traits)["Extraversion"]/trait_counts["Extraversion"] *20 ,
+               round(traits["Agreeableness"]/trait_counts["Agreeableness"]*20),
+               round(traits["Conscientiousness"]/trait_counts["Conscientiousness"]*20),
+               round(traits["Emotional Stability"]/trait_counts["Emotional Stability"]*20),
+               round(traits["Openn  ess"]/trait_counts["Openness"]*20),]
         safe_append(profile_sheet, row)
         st.success("Profile saved! You can now proceed to chat.")
         st.session_state["completed_test"] = True
@@ -240,6 +245,10 @@ if user_name.lower() == "admin":
     
     # 追加: 全ユーザー一覧表示
     st.sidebar.subheader("All Users")
-    all_profiles = profile_sheet.get_all_records()
+    all_profiles = profile_sheet.get_all_records(expected_headers=[
+    "Username", "SessionID", "ExperimentCondition",
+    "Extraversion", "Agreeableness", "Conscientiousness",
+    "Emotional Stability", "Openness"
+    ])
     for p in all_profiles:
         st.sidebar.write(f"{p['Username']} | Condition: {p.get('ExperimentCondition', 'N/A')} | Match: {p.get('MatchMode', 'N/A')}")
