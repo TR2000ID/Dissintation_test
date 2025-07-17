@@ -271,10 +271,6 @@ if user_name.lower() == "admin":
     
     # 追加: 全ユーザー一覧表示
     st.sidebar.subheader("All Users")
-    all_profiles = profile_sheet.get_all_records(expected_headers=[
-    "Username", "SessionID", "ExperimentCondition",
-    "Extraversion", "Agreeableness", "Conscientiousness",
-    "Emotional Stability", "Openness"
-    ])
+    all_profiles = profile_sheet.get_all_records()  # ←これでOK
     for p in all_profiles:
         st.sidebar.write(f"{p['Username']} | Condition: {p.get('ExperimentCondition', 'N/A')} | Match: {p.get('MatchMode', 'N/A')}")
