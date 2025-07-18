@@ -97,73 +97,131 @@ def get_profile(user):
     return None
 
 # === Personaプロンプト生成 ===
+import requests
+import streamlit as st
+import json
+
 def generate_persona_prompt(profile, match=True):
+    # Big Five スコア取得
     ex = int(profile.get("Extraversion", 50))
     ag = int(profile.get("Agreeableness", 50))
     es = int(profile.get("Emotional Stability", 50))
     op = int(profile.get("Openness", 50))
     co = int(profile.get("Conscientiousness", 50))
 
-    # Fixed Empathy condition
+    # === Fixed Empathy condition ===
     if st.session_state.experiment_condition == "Fixed Empathy":
-        style = random.choice(["Counselor", "Casual"])
-        if style == "Counselor":
-            return ("You are a professional counselor. Always structure your answer exactly as: "
-                    "(1) Empathy, (2) Reflective Question?, (3) Practical Suggestion. "
-                    "Example: 'I understand how hard this feels. How do you usually cope with stress? "
-                    "One idea is to break tasks into smaller steps.' "
-                    "Keep responses concise (max 2 sentences unless user requests more).")
-
-        else:
-            return ("You are a friendly and casual friend. Use this flow: "
-                    "Empathy. Light humor. Suggestion. "
-                    "Keep it short (max 2 sentences).")
-
-    # Personalized (Match or Non-Match)
-    if match:
-        empathy = "Show deep empathy warmly." if ag >= 60 else "Show light empathy with practicality."
-        reassurance = "Offer reassurance often." if es < 40 else "Encourage optimism gently."
-        tone = "Be highly energetic and positive." if ex >= 70 else "Be calm and steady."
-        creativity = "Use creative, imaginative examples." if op >= 60 else "Stay practical and simple."
-        structure = "Give structured advice." if co >= 60 else "Keep advice flexible and simple."
-    else:
-        empathy = "Respond with minimal empathy, blunt and factual."
-        reassurance = "Do not offer emotional reassurance."
-        tone = "Keep tone cold and detached. Do not ask questions."
-        creativity = "Avoid creativity; stay rigid."
-        structure = "Avoid giving structured advice."
-
-    return (f"You are an AI assistant. {empathy} {reassurance} {tone} {creativity} {structure} "
-            f"Respond in 2 short sentences unless asked for details.")
-
-
-# === 応答生成 ===
-def generate_response(user_input):
-    profile = get_profile(user_name)
-    history_len = len(st.session_state.chat_history) // 2
-    if not st.session_state["matched_mode"] and history_len >= MAX_NONMATCH_ROUNDS:
-        st.session_state["matched_mode"] = True
-
-    persona = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
-    prompt = (f"EXPERIMENT CONDITION: {st.session_state.experiment_condition}, "
-              f"MATCH: {st.session_state['matched_mode']}\n"
-              f"{persona}\nUser: {user_input}\nAssistant:")
-
-    try:
-        detail_flag = any(kw in user_input.lower() for kw in ["tell me more", "explain", "more detail"])
-        max_tokens = 150 if detail_flag else 80
-        
-        response = requests.post(
-            "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": prompt, "max_tokens": max_tokens, "temperature": 0.7},
-            timeout=60
+        return (
+            "You are a professional counselor.\n"
+            "Your response MUST strictly follow this format:\n"
+            "(1) Empathy: [One short empathetic sentence]\n"
+            "(2) Question: [One reflective question]\n"
+            "(3) Suggestion: [One practical suggestion]\n\n"
+            "Examples:\n"
+            "(1) Empathy: I understand this feels overwhelming.\n"
+            "(2) Question: What usually helps you calm down in such moments?\n"
+            "(3) Suggestion: Try slow breathing for 2 minutes.\n\n"
+            "(1) Empathy: That sounds stressful and exhausting.\n"
+            "(2) Question: When did you first notice this pattern?\n"
+            "(3) Suggestion: You could try writing your thoughts in a journal.\n\n"
+            "Keep it concise (max 3 short sentences). DO NOT omit any part."
         )
-        result = response.json().get("response", "")
-        # 応答を2文に制御
-        sentences = result.replace("[END]", "").strip().split('.')
-        return '. '.join(s.strip() for s in sentences[:2] if s.strip()) + '.'
-    except Exception as e:
-        return "Sorry, the assistant is currently unavailable. please try entering one more time. If that doesn't work contact Ryosuke Komatsu to look into the issue."
+
+    # === Personalized Empathy (Match condition) ===
+    if match:
+        tone = "Energetic tone." if ex >= 70 else "Calm tone."
+        empathy_style = "Strong empathy warmly." if ag >= 60 else "Light empathy with practicality."
+        reassurance = "Include reassurance." if es < 40 else "Encourage optimism."
+        creativity = "Give a creative suggestion." if op >= 60 else "Keep suggestion practical."
+        structure = "Make suggestion structured." if co >= 60 else "Keep advice flexible."
+
+        return (
+            "You are an AI counselor.\n"
+            "Your response MUST strictly follow this format:\n"
+            "(1) Empathy: [Tone adapted to personality]\n"
+            "(2) Question: [One reflective question]\n"
+            "(3) Suggestion: [One practical tip tailored to personality]\n\n"
+            f"User traits:\n"
+            f"- Extraversion: {ex}, Agreeableness: {ag}, Conscientiousness: {co}, Emotional Stability: {es}, Openness: {op}\n\n"
+            "Guidelines:\n"
+            f"- {tone}\n- {empathy_style}\n- {reassurance}\n- {creativity}\n- {structure}\n\n"
+            "Examples:\n"
+            "(1) Empathy: I know this feels like a heavy load to carry.\n"
+            "(2) Question: What is one small thing you could do today to feel better?\n"
+            "(3) Suggestion: Try a 5-minute breathing exercise and write one positive thought.\n\n"
+            "(1) Empathy: It sounds like a lot is on your mind.\n"
+            "(2) Question: What usually helps you when things feel heavy?\n"
+            "(3) Suggestion: Try writing down one positive thing before bed.\n\n"
+            "Keep it concise (max 3 short sentences). DO NOT omit (1)(2)(3)."
+        )
+
+    # === Non-Match condition ===
+    return (
+        "Respond in this strict format:\n"
+        "One blunt factual sentence only. No empathy. No reflective question.\n"
+        "Provide one simple practical tip.\n"
+        "Example: Focus on one task at a time and ignore distractions."
+    )
+
+def generate_response(user_input):
+    with st.spinner("Generating response... Please wait."):
+        profile = get_profile(user_name)
+        history_len = len(st.session_state.chat_history) // 2
+        if not st.session_state["matched_mode"] and history_len >= MAX_NONMATCH_ROUNDS:
+            st.session_state["matched_mode"] = True
+
+        persona = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
+        prompt = (
+            f"EXPERIMENT CONDITION: {st.session_state.experiment_condition}, "
+            f"MATCH: {st.session_state['matched_mode']}\n"
+            f"{persona}\nUser: {user_input}\nAssistant:"
+        )
+
+        detail_flag = any(kw in user_input.lower() for kw in ["tell me more", "explain", "more detail"])
+        max_tokens = 150 if detail_flag else 120
+
+        for attempt in range(3):  # 最大3回再生成
+            try:
+                response = requests.post(
+                    "https://royalmilktea103986368-dissintation.hf.space/generate",
+                    json={"prompt": prompt, "max_tokens": max_tokens, "temperature": 0.4},
+                    timeout=90
+                )
+
+                if response.status_code != 200:
+                    st.warning(f"API Error: {response.status_code} on attempt {attempt+1}")
+                    continue
+
+                data = response.json()
+                result = data.get("response", "").strip()
+
+                # === フォーマット検証 ===
+                lines = [l.strip() for l in result.splitlines() if l.strip()]
+                if (
+                    len(lines) == 3 and
+                    all(tag in lines[i] for i, tag in enumerate(["(1)", "(2)", "(3)"])) and
+                    all(10 < len(line) < 120 for line in lines)
+                ):
+                    return result
+
+                # 再試行プロンプト強化
+                prompt += (
+                    "\nYour previous response was invalid. Retry and include ALL of these: "
+                    "(1), (2), (3). Follow the format exactly as shown in examples. Keep it concise."
+                )
+
+            except Exception as e:
+                st.error(f"Exception on attempt {attempt+1}: {e}")
+                continue
+
+        # === フォールバック応答 ===
+        return (
+            "(1) Empathy: I understand this is difficult.\n"
+            "(2) Question: What usually helps you calm down?\n"
+            "(3) Suggestion: Try writing your thoughts down."
+        )
+
+
 
 # === Personality Test ===
 if page == "Personality Test":
