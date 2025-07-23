@@ -101,86 +101,167 @@ import requests
 import streamlit as st
 import json
 
-def generate_persona_prompt(profile, match=True):
-    # Big Five スコア取得
-    ex = int(profile.get("Extraversion", 50))
-    ag = int(profile.get("Agreeableness", 50))
-    es = int(profile.get("Emotional Stability", 50))
-    op = int(profile.get("Openness", 50))
-    co = int(profile.get("Conscientiousness", 50))
+def trait_level(score):
+    if score >= 60: return "High"
+    elif score >= 40: return "Moderate"
+    else: return "Low"
 
-    # === Fixed Empathy condition ===
+def generate_persona_prompt(profile, match=True):
+    # Convert Big Five scores to High/Moderate/Low
+    def trait_level(score):
+        if score >= 60: return "High"
+        elif score >= 40: return "Moderate"
+        return "Low"
+
+    ex_level = trait_level(int(profile.get("Extraversion", 50)))
+    ag_level = trait_level(int(profile.get("Agreeableness", 50)))
+    co_level = trait_level(int(profile.get("Conscientiousness", 50)))
+    es_level = trait_level(int(profile.get("Emotional Stability", 50)))
+    op_level = trait_level(int(profile.get("Openness", 50)))
+
+    # Global Safety & Ethical Rules
+    safety_instructions = (
+        "IMPORTANT SAFETY RULES:\n"
+        "- Do NOT provide medical diagnosis or medication advice.\n"
+        "- Do NOT include medication names or suggest treatment changes.\n"
+        "- Do NOT make assumptions about user's trauma or abuse history.\n"
+        "- Do NOT provide legal or financial advice.\n"
+        "- If user mentions self-harm or suicide, do NOT provide coping tips. "
+        "Instead, respond with empathy and refer to crisis helplines.\n"
+    )
+
+    # Fixed Empathy Mode
     if st.session_state.experiment_condition == "Fixed Empathy":
         return (
-            "You are a professional counselor.\n"
+            f"{safety_instructions}\n"
+            "You are a professional mental health counselor.\n"
             "Your response MUST strictly follow this format:\n"
             "(1) Empathy: [One short empathetic sentence]\n"
             "(2) Question: [One reflective question]\n"
-            "(3) Suggestion: [One practical suggestion]\n\n"
-            "Examples:\n"
-            "(1) Empathy: I understand this feels overwhelming.\n"
-            "(2) Question: What usually helps you calm down in such moments?\n"
-            "(3) Suggestion: Try slow breathing for 2 minutes.\n\n"
-            "(1) Empathy: That sounds stressful and exhausting.\n"
-            "(2) Question: When did you first notice this pattern?\n"
-            "(3) Suggestion: You could try writing your thoughts in a journal.\n\n"
-            "Keep it concise (max 3 short sentences). DO NOT omit any part."
+            "(3) Suggestion: [One practical coping tip]\n"
+            "Keep it concise (max 3 short sentences). Avoid medical terms."
         )
 
-    # === Personalized Empathy (Match condition) ===
+    # Personalized Mode
     if match:
-        tone = "Energetic tone." if ex >= 70 else "Calm tone."
-        empathy_style = "Strong empathy warmly." if ag >= 60 else "Light empathy with practicality."
-        reassurance = "Include reassurance." if es < 40 else "Encourage optimism."
-        creativity = "Give a creative suggestion." if op >= 60 else "Keep suggestion practical."
-        structure = "Make suggestion structured." if co >= 60 else "Keep advice flexible."
+        # Tone
+        if ex_level == "High":
+            tone_instruction = "Speak in an upbeat, lively, and motivating manner."
+        elif ex_level == "Moderate":
+            tone_instruction = "Speak in a friendly, balanced, and reassuring tone."
+        else:
+            tone_instruction = "Speak in a calm, steady, and soothing manner."
+
+        # Empathy
+        if ag_level == "High":
+            empathy_instruction = "Show strong warmth and emotional understanding."
+        elif ag_level == "Moderate":
+            empathy_instruction = "Show moderate empathy with supportive tone."
+        else:
+            empathy_instruction = "Show minimal empathy, keep it factual but kind."
+
+        # Structure
+        if co_level == "High":
+            structure_instruction = "Give clear, structured, step-by-step advice."
+        elif co_level == "Moderate":
+            structure_instruction = "Give moderately structured guidance."
+        else:
+            structure_instruction = "Give flexible, open-ended advice."
+
+        # Optimism
+        if es_level == "High":
+            optimism_instruction = "Include light optimism, avoid overpromising."
+        elif es_level == "Moderate":
+            optimism_instruction = "Encourage optimism in a balanced manner."
+        else:
+            optimism_instruction = "Provide frequent reassurance and comfort."
+
+        # Creativity
+        if op_level == "High":
+            creativity_instruction = "Include creative and imaginative coping ideas."
+        elif op_level == "Moderate":
+            creativity_instruction = "Mix practical tips with small creative suggestions."
+        else:
+            creativity_instruction = "Stick to practical, evidence-based advice."
 
         return (
-            "You are an AI counselor.\n"
+            f"{safety_instructions}\n"
+            "You are an AI mental health support assistant.\n"
+            "Adapt your response based on the user's personality traits:\n"
+            f"- {tone_instruction}\n"
+            f"- {empathy_instruction}\n"
+            f"- {structure_instruction}\n"
+            f"- {optimism_instruction}\n"
+            f"- {creativity_instruction}\n\n"
             "Your response MUST strictly follow this format:\n"
-            "(1) Empathy: [Tone adapted to personality]\n"
+            "(1) Empathy: [Short empathetic sentence]\n"
             "(2) Question: [One reflective question]\n"
-            "(3) Suggestion: [One practical tip tailored to personality]\n\n"
-            f"User traits:\n"
-            f"- Extraversion: {ex}, Agreeableness: {ag}, Conscientiousness: {co}, Emotional Stability: {es}, Openness: {op}\n\n"
-            "Guidelines:\n"
-            f"- {tone}\n- {empathy_style}\n- {reassurance}\n- {creativity}\n- {structure}\n\n"
-            "Examples:\n"
-            "(1) Empathy: I know this feels like a heavy load to carry.\n"
-            "(2) Question: What is one small thing you could do today to feel better?\n"
-            "(3) Suggestion: Try a 5-minute breathing exercise and write one positive thought.\n\n"
-            "(1) Empathy: It sounds like a lot is on your mind.\n"
-            "(2) Question: What usually helps you when things feel heavy?\n"
-            "(3) Suggestion: Try writing down one positive thing before bed.\n\n"
-            "Keep it concise (max 3 short sentences). DO NOT omit (1)(2)(3)."
+            "(3) Suggestion: [One practical coping tip]\n"
+            "Keep answers concise (max 3 short sentences). Avoid medical terms."
         )
 
-    # === Non-Match condition ===
+    # Non-Match Mode
     return (
-        "Respond in this strict format:\n"
-        "One blunt factual sentence only. No empathy. No reflective question.\n"
-        "Provide one simple practical tip.\n"
-        "Example: Focus on one task at a time and ignore distractions."
+        f"{safety_instructions}\n"
+        "Respond in a direct and practical tone. No empathy or emotional language.\n"
+        "Give one simple coping tip only.\n"
+        "Example: 'Focus on one task at a time and take short breaks.'"
     )
 
+
 def generate_response(user_input):
+    # Crisis Detection
+    crisis_keywords = [
+        "suicide", "kill myself", "end my life", "self-harm",
+        "can't go on", "hopeless", "worthless", "life is meaningless", "give up"
+    ]
+    if any(kw in user_input.lower() for kw in crisis_keywords):
+        st.error("⚠ Crisis detected: Providing emergency response information.")
+        return (
+            "(1) Empathy: I'm really sorry you're feeling this way. You are not alone.\n"
+            "(2) Important: If you are in danger or thinking about self-harm, please reach out immediately.\n"
+            "(3) Helplines: In the US, call 988. In the UK, call Samaritans at 116 123. "
+            "If elsewhere, search for your local crisis hotline."
+        )
+
+    # Medication or diagnosis request detection
+    prohibited_keywords = ["diagnose", "diagnosis", "medication", "antidepressant", "pill", "prescribe"]
+    if any(kw in user_input.lower() for kw in prohibited_keywords):
+        return (
+            "(1) Empathy: I understand your concern.\n"
+            "(2) Note: I cannot provide medical diagnosis or medication advice.\n"
+            "(3) Suggestion: Please consult a licensed healthcare professional for these matters."
+        )
+
+    # Randomized, evidence-based coping suggestions (WHO & CBT)
+    coping_strategies = [
+        "Try slow, deep breathing for 2 minutes.",
+        "Write down three things you are grateful for.",
+        "Take a short walk or stretch for 5 minutes.",
+        "Use the 5-4-3-2-1 grounding technique: Name 5 things you see, 4 you feel, 3 you hear, 2 you smell, 1 you taste.",
+        "Break a big task into smaller steps and start with one easy task.",
+        "Listen to a calming playlist or nature sounds for 5 minutes."
+    ]
+    selected_tip = random.choice(coping_strategies)
+
+    # Generate response with API
     with st.spinner("Generating response... Please wait."):
         profile = get_profile(user_name)
         history_len = len(st.session_state.chat_history) // 2
         if not st.session_state["matched_mode"] and history_len >= MAX_NONMATCH_ROUNDS:
             st.session_state["matched_mode"] = True
 
-        persona = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
+        persona_prompt = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
         prompt = (
             f"EXPERIMENT CONDITION: {st.session_state.experiment_condition}, "
             f"MATCH: {st.session_state['matched_mode']}\n"
-            f"{persona}\nUser: {user_input}\nAssistant:"
+            f"{persona_prompt}\nUser: {user_input}\nAssistant:"
         )
 
         detail_flag = any(kw in user_input.lower() for kw in ["tell me more", "explain", "more detail"])
         max_tokens = 150 if detail_flag else 120
 
-        for attempt in range(3):  # 最大3回再生成
+        for attempt in range(3):  # Retry loop
             try:
                 response = requests.post(
                     "https://royalmilktea103986368-dissintation.hf.space/generate",
@@ -195,7 +276,7 @@ def generate_response(user_input):
                 data = response.json()
                 result = data.get("response", "").strip()
 
-                # === フォーマット検証 ===
+                # Validate format
                 lines = [l.strip() for l in result.splitlines() if l.strip()]
                 if (
                     len(lines) == 3 and
@@ -204,23 +285,23 @@ def generate_response(user_input):
                 ):
                     return result
 
-                # 再試行プロンプト強化
+                # Prompt refinement if invalid
                 prompt += (
-                    "\nYour previous response was invalid. Retry and include ALL of these: "
-                    "(1), (2), (3). Follow the format exactly as shown in examples. Keep it concise."
+                    "\nYour previous response did NOT follow the required format."
+                    "Retry and include ALL of these: (1), (2), (3)."
+                    "Do NOT repeat invalid or incomplete answers."
                 )
 
             except Exception as e:
                 st.error(f"Exception on attempt {attempt+1}: {e}")
                 continue
 
-        # === フォールバック応答 ===
+        # Final fallback response
         return (
-            "(1) Empathy: I understand this is difficult.\n"
-            "(2) Question: What usually helps you calm down?\n"
-            "(3) Suggestion: Try writing your thoughts down."
+            f"(1) Empathy: I understand this is difficult.\n"
+            f"(2) Question: What usually helps you feel a bit better?\n"
+            f"(3) Suggestion: {selected_tip}"
         )
-
 
 
 # === Personality Test ===
@@ -232,16 +313,40 @@ if page == "Personality Test":
 
     def interpret_trait(trait, score):
         if trait == "Extraversion":
-            return "High → Sociable and energetic" if score >= 60 else "Low → Reserved and quiet"
+            if score >= 60: 
+                return "High → Very outgoing and energetic"
+            elif score >= 40: 
+                return "Moderate → Balanced between sociable and reserved"
+            else: 
+                return "Low → Quiet and reserved"
         if trait == "Agreeableness":
-            return "High → Cooperative and empathetic" if score >= 60 else "Low → Independent, sometimes critical"
+            if score >= 60: return "High → Cooperative and empathetic"
+            elif score >= 40: return "Moderate → Balanced between friendly and assertive"
+            else: 
+                return "Low → Independent and critical"
         if trait == "Conscientiousness":
-            return "High → Organized and responsible" if score >= 60 else "Low → Flexible, sometimes impulsive"
+            if score >= 60: 
+                return "High → Organized and responsible"
+            elif score >= 40: 
+                return "Moderate → Sometimes structured, sometimes flexible"
+            else: 
+                return "Low → Spontaneous and less structured"
         if trait == "Emotional Stability":
-            return "High → Calm and resilient" if score >= 60 else "Low → Sensitive to stress and emotions"
+            if score >= 60: 
+                return "High → Calm and resilient"
+            elif score >= 40: 
+                return "Moderate → Occasionally stressed but generally balanced"
+            else: 
+                return "Low → Sensitive to stress and emotions"
         if trait == "Openness":
-            return "High → Creative and open to new ideas" if score >= 60 else "Low → Prefers familiarity and routine"
+            if score >= 60: 
+                return "High → Creative and open to new ideas"
+            elif score >= 40: 
+                return "Moderate → Appreciates some novelty but prefers familiarity"
+            else: 
+                return "Low → Prefers routine and familiarity"
         return ""
+
 
     # 質問セット（BFI-44）
     bfi_questions = [
