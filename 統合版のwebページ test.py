@@ -202,13 +202,11 @@ def generate_persona_prompt(profile, match=True):
 import difflib
 
 def generate_response(user_input):
-    # ✅ Crisis Detection
     crisis_keywords = [
         "suicide", "kill myself", "end my life", "self-harm",
         "can't go on", "hopeless", "worthless", "life is meaningless", "give up"
     ]
     if any(kw in user_input.lower() for kw in crisis_keywords):
-        st.error("⚠ Crisis detected: Providing emergency response information.")
         return (
             "(1) Empathy: I'm really sorry you're feeling this way. You are not alone.\n"
             "(2) Important: If you are in danger or thinking about self-harm, please reach out immediately.\n"
@@ -216,7 +214,6 @@ def generate_response(user_input):
             "If elsewhere, search for your local crisis hotline."
         )
 
-    # ✅ Medication or diagnosis request detection
     prohibited_keywords = ["diagnose", "diagnosis", "medication", "antidepressant", "pill", "prescribe"]
     if any(kw in user_input.lower() for kw in prohibited_keywords):
         return (
@@ -225,42 +222,31 @@ def generate_response(user_input):
             "(3) Suggestion: Please consult a licensed healthcare professional for these matters."
         )
 
-    # ✅ Generate response with API
     with st.spinner("Generating response... Please wait."):
         profile = get_profile(user_name)
         history_len = len(st.session_state.chat_history) // 2
         if not st.session_state["matched_mode"] and history_len >= MAX_NONMATCH_ROUNDS:
             st.session_state["matched_mode"] = True
 
-        # Build persona prompt
         persona_prompt = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
         prompt = (
             f"EXPERIMENT CONDITION: {st.session_state.experiment_condition}, "
             f"MATCH: {st.session_state['matched_mode']}\n"
             f"{persona_prompt}\n\n"
-            "Rules for response diversity:\n"
-            "- Do NOT repeat sentence openings or phrases used previously.\n"
-            "- Use synonyms and varied sentence structures.\n"
-            "- Ensure the tone feels natural and conversational.\n"
-            "- Do NOT provide generic or unrelated tips.\n\n"
+            "Rules:\n"
+            "- Keep tone natural and empathetic.\n"
+            "- Avoid repeating same phrasing.\n"
             f"User: {user_input}\nAssistant:"
         )
 
-        detail_flag = any(kw in user_input.lower() for kw in ["tell me more", "explain", "more detail"])
-        max_tokens = 200 if detail_flag else 160
+        max_tokens = 200 if "detail" in user_input.lower() else 160
 
-        # Retry loop with diversity tweaks
         for attempt in range(3):
             try:
                 response = requests.post(
                     "https://royalmilktea103986368-dissintation.hf.space/generate",
-                    json={
-                        "prompt": prompt,
-                        "max_tokens": max_tokens,
-                        "temperature": 0.95,  # Higher for more variation
-                        "top_p": 0.9          # Sampling for diversity
-                    },
-                    timeout=90
+                    json={"prompt": prompt, "max_tokens": max_tokens, "temperature": 0.95, "top_p": 0.9},
+                    timeout=120
                 )
 
                 if response.status_code != 200:
@@ -270,27 +256,26 @@ def generate_response(user_input):
                 data = response.json()
                 result = data.get("response", "").strip()
 
-                # Validate format
+                if not result:
+                    st.warning("Empty response from API.")
+                    continue
+
                 lines = [l.strip() for l in result.splitlines() if l.strip()]
-                if (
-                    len(lines) == 3 and
-                    all(tag in lines[i] for i, tag in enumerate(["(1)", "(2)", "(3)"])) and
-                    all(10 < len(line) < 150 for line in lines)
-                ):
+
+                if "(1)" in result and "(2)" in result and "(3)" in result:
                     return result
 
-                # Strengthen diversity on retry
-                prompt += "\nYour last response lacked variation. Use a different tone, phrasing, and tip."
+                if len(lines) >= 3:
+                    return "\n".join(lines[:3])
+
+                return result
 
             except Exception as e:
                 st.error(f"Exception on attempt {attempt+1}: {e}")
                 continue
 
-        # ✅ Final fallback
-        return (
-            "Sorry, the assistant is currently unavailable. Please try entering one more time. "
-            "If that doesn't work, contact Ryosuke Komatsu to look into the issue."
-        )
+        return "Sorry, the assistant is currently unavailable. Please try entering one more time. If that doesn't work, contact Ryosuke Komatsu to look into the issue."
+
 
 # === Personality Test ===
 if page == "Personality Test":
