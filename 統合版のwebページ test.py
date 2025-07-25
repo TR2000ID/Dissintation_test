@@ -177,7 +177,7 @@ def generate_response(user_input):
             response = requests.post(
                 "https://royalmilktea103986368-dissintation.hf.space/generate",
                 json={"prompt": prompt, "max_tokens": 180, "temperature": 0.85, "top_p": 0.9},
-                timeout=60
+                timeout=300
             )
             if response.status_code != 200:
                 time.sleep(1.5 * (attempt + 1))  # Backoff
