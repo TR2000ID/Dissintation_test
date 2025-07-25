@@ -129,9 +129,13 @@ def determine_tone(profile, match=True):
 
     return tone, empathy, style, emotional, creativity
 
-
 def generate_response(user_input):
-    # 危機対応
+    """
+    Generates a response using Hugging Face API.
+    If the API fails or returns an empty response, clearly inform the user in English.
+    """
+
+    # ✅ Crisis Handling
     crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
     if any(kw in user_input.lower() for kw in crisis_keywords):
         return "I'm really sorry you're feeling this way. You're not alone. Please consider reaching out to someone you trust or a crisis hotline."
@@ -140,14 +144,15 @@ def generate_response(user_input):
     if any(kw in user_input.lower() for kw in prohibited_keywords):
         return "I understand your concern. It might be best to discuss this with a healthcare professional for your safety."
 
+    # ✅ User profile
     profile = get_profile(user_name)
 
-    # 過去履歴と禁止応答リスト
+    # ✅ Context and banned text
     context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
     previous_ai_responses = [msg['content'] for msg in st.session_state.chat_history if msg['role'] == 'AI']
     banned_text = "\n".join(previous_ai_responses[-5:]) if previous_ai_responses else "None"
 
-    # 提案カテゴリをランダムで選択
+    # ✅ Suggestion category (random)
     suggestion_categories = [
         "Suggest a social activity like connecting with a friend or joining a group.",
         "Suggest a creative hobby like painting, music, or journaling.",
@@ -156,27 +161,28 @@ def generate_response(user_input):
     ]
     chosen_category = random.choice(suggestion_categories)
 
-    # モード別性格スタイル
+    # ✅ Tone based on mode
     if st.session_state.experiment_condition == "Fixed Empathy":
         tone_instruction = "Maintain a calm, professional, and reassuring tone, like a licensed counselor."
     else:
         tone, empathy, style, emotional, creativity = determine_tone(profile, match=st.session_state["matched_mode"])
-        tone_instruction = f"Reflect these traits in your tone: Tone={tone}, Empathy={empathy}, Structure={style}, Emotion={emotional}, Creativity={creativity}."
+        tone_instruction = f"Reflect these traits STRONGLY: Tone={tone}, Empathy={empathy}, Style={style}, Emotion={emotional}, Creativity={creativity}."
 
-    # 改善されたプロンプト（ChatGPT風 + 性格反映）
+    # ✅ Prompt for Hugging Face API
     base_prompt = f"""
 You are a supportive and intelligent assistant for mental well-being.
 {tone_instruction}
 
-Your goal: Respond naturally and personally, like ChatGPT, but with the specified personality.
-Follow these rules strictly:
-- Use at least one keyword from the user's message in your first sentence.
-- Avoid phrases like: "That sounds tough", "I understand", "It must be hard".
-- Keep tone natural and conversational, not robotic.
+Your goal: Respond naturally and personally, like ChatGPT, with the specified personality.
+Follow these strict rules:
+- Begin by using at least one keyword from the user's message in your first sentence.
+- Avoid phrases like: "That sounds tough", "I understand", "It must be hard", "It can be overwhelming".
+- Make it conversational and natural (not robotic).
 - Structure:
-    1. Acknowledge the user's concern clearly using their own words or synonyms.
-    2. Ask a question that directly relates to their concern (NOT generic).
-    3. {chosen_category} — and explain in one short sentence why it fits their situation.
+    1. Acknowledge the user's concern using their words.
+    2. Ask a question directly related to their concern (NOT generic).
+    3. {chosen_category} — AND explain briefly why it helps.
+- Always include one sentence explaining why the suggestion could help.
 - Ensure this response is different from previous ones:
 {banned_text}
 - Keep it short (2–3 sentences), warm, and positive.
@@ -189,25 +195,30 @@ User's latest message: {user_input}
 Assistant:
 """
 
-    try:
-        response = requests.post(
-            "https://huggingface.co/spaces/RoyalMilkTea103986368/Dissintation/generate",
-            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 1.3, "top_p": 1.0},
-            timeout=25
-        )
-        result = response.json().get("response", "").strip()
-        if result:
-            return result
-    except Exception:
-        pass
+    # ✅ API Request
+    API_URL = "https://royalmilktea103986368-dissintation.hf.space/generate"
+    payload = {
+        "prompt": base_prompt,
+        "max_tokens": 180,
+        "temperature": 1.3,
+        "top_p": 1.0
+    }
 
-    # Fallback（ユーザー入力を必ず含める）
-    fallback_responses = [
-        f"You mentioned '{user_input}'. How would reaching out to someone you trust feel? It often helps reduce stress because it creates connection.",
-        f"Thinking about '{user_input}' can feel heavy. What small step could make you feel better? Maybe journaling your thoughts can help organize them.",
-        f"Since '{user_input}' is on your mind, what if you tried a calming exercise like deep breathing? It helps reset your mood in just a few minutes."
-    ]
-    return random.choice(fallback_responses)
+    try:
+        response = requests.post(API_URL, json=payload, timeout=30)
+        if response.status_code == 200:
+            result = response.json().get("response", "").strip()
+            if result:
+                return result
+            else:
+                st.error("⚠️ API returned status 200 but no response text. Please check backend logic.")
+                return "System could not generate a response. The AI returned an empty message."
+        else:
+            st.error(f"⚠️ API Error: Status Code {response.status_code}. Please check Hugging Face Space logs.")
+            return f"System could not generate a response (Error {response.status_code}). Please try again."
+    except Exception as e:
+        st.error(f"⚠️ Connection Error: {str(e)}")
+        return "System could not generate a response due to a connection error. Please retry later."
 
 
 # === Personality Test ===
