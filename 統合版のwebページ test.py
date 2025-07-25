@@ -155,6 +155,7 @@ def clean_response(text):
     return text.split("\n")[0].strip()
 
 def generate_response(user_input):
+    # 危機対応
     crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
     if any(kw in user_input.lower() for kw in crisis_keywords):
         return "I'm really sorry you're feeling this way. You're not alone. Please consider reaching out to someone you trust or a crisis hotline."
@@ -163,16 +164,17 @@ def generate_response(user_input):
     if any(kw in user_input.lower() for kw in prohibited_keywords):
         return "I understand your concern. It might be best to discuss this with a healthcare professional for your safety."
 
-    # Big Five → tone調整（任意）
+    # Big Fiveによるトーン調整
     profile = get_profile(user_name)
     tone = "friendly and uplifting" if profile and int(profile.get("Extraversion", 50)) >= 60 else "calm and reassuring"
 
+    # プロンプト（自然な会話指示）
     base_prompt = (
         f"You are a supportive and friendly assistant for mental well-being.\n"
         f"Tone: {tone}.\n"
         "Respond in a natural, conversational tone.\n"
         "Include empathy, a reflective question, and a practical tip, but make it flow like normal conversation.\n"
-        "Keep it short (2–3 sentences).\n"
+        "Keep it concise (2–3 sentences).\n"
         "Do not use numbered sections or labels.\n"
         f"User: {user_input}\n"
         "Assistant:"
@@ -181,15 +183,19 @@ def generate_response(user_input):
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": base_prompt, "max_tokens": 200, "temperature": 0.8, "top_p": 0.9},
+            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 0.8, "top_p": 0.9},
             timeout=15
         )
         result = response.json().get("response", "").strip()
+
         if result:
             return result
 
     except Exception:
-        return "That sounds tough. What do you think might make things feel a little easier? Maybe start with one small step, like taking a quick break."
+        pass
+
+    # fallback（自然会話）
+    return "That sounds tough. What do you think might make things feel a little easier? Maybe start with one small step, like taking a quick break."
 
 
 # === Personality Test ===
