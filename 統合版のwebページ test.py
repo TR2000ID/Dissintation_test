@@ -145,7 +145,7 @@ def generate_persona_prompt(profile, match=True):
 
 import difflib
 def generate_response(user_input):
-    # Crisis handling
+    # 危機管理（即時応答）
     crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
     if any(kw in user_input.lower() for kw in crisis_keywords):
         return (
@@ -162,9 +162,20 @@ def generate_response(user_input):
             "(3) Suggestion: For your safety, please seek professional medical advice."
         )
 
+    # Big Fiveを反映した簡潔プロンプト
     profile = get_profile(user_name)
-    persona_prompt = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
-    prompt = f"{persona_prompt}\nUser: {user_input}\nAssistant:"
+    tone = "Upbeat and motivating" if profile and int(profile.get("Extraversion", 50)) >= 60 else "Calm and reassuring"
+    structure = "Step-by-step advice" if profile and int(profile.get("Conscientiousness", 50)) >= 60 else "Simple tips"
+
+    base_prompt = (
+        f"You are an empathetic mental health assistant.\n"
+        f"Tone: {tone}. Structure: {structure}.\n"
+        "Respond in 3 parts:\n"
+        "(1) Empathy\n(2) Reflective Question\n(3) Practical Suggestion\n"
+        "Avoid medical, legal, or financial advice.\n"
+        f"User: {user_input}\n"
+        "Assistant:"
+    )
 
     fallback_responses = [
         "(1) Empathy: That sounds challenging.\n(2) Question: What small step could help right now?\n(3) Suggestion: Try a short breathing exercise.",
@@ -176,29 +187,28 @@ def generate_response(user_input):
         try:
             response = requests.post(
                 "https://royalmilktea103986368-dissintation.hf.space/generate",
-                json={"prompt": prompt, "max_tokens": 180, "temperature": 0.85, "top_p": 0.9},
-                timeout=1000000
+                json={"prompt": base_prompt, "max_tokens": 200, "temperature": 0.85, "top_p": 0.9},
+                timeout=15
             )
             if response.status_code != 200:
-                time.sleep(1.5 * (attempt + 1))  # Backoff
+                time.sleep(1.5 * (attempt + 1))
                 continue
 
             result = response.json().get("response", "").strip()
-            if all(tag in result for tag in ["(1)", "(2)", "(3)"]):
+            result = result.replace(base_prompt, "").strip()  # クリーンアップ
+
+            if result and all(tag in result for tag in ["(1)", "(2)", "(3)"]):
                 return result
 
-            # If partial tags missing → add fallback structure
-            return result + "\n\n" + random.choice(fallback_responses)
+            if result:
+                return result + "\n\n" + random.choice(fallback_responses)
 
         except requests.Timeout:
             st.warning(f"Attempt {attempt+1}: API timeout.")
         except Exception as e:
             st.error(f"Attempt {attempt+1} failed: {e}")
 
-    # Final fallback
     return random.choice(fallback_responses)
-
-
 
 
 # === Personality Test ===
