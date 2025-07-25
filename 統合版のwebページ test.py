@@ -140,7 +140,7 @@ def generate_response(user_input):
 
     profile = get_profile(user_name)
 
-    # 過去の履歴と禁止応答リスト
+    # 過去履歴と禁止応答リスト
     context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
     previous_ai_responses = [msg['content'] for msg in st.session_state.chat_history if msg['role'] == 'AI']
     banned_text = "\n".join(previous_ai_responses[-5:]) if previous_ai_responses else "None"
@@ -152,13 +152,14 @@ You are an empathetic counselor chatbot.
 Always respond calmly, kindly, and consistently.
 
 Instructions:
+- Reflect the user’s specific concern explicitly in the first sentence.
 - Respond in a completely different way from previous answers.
-- Absolutely avoid starting with phrases like:
+- Absolutely avoid starting with or using phrases like:
   "That sounds tough", "That must be challenging", "I can see how"
 - Avoid repeating any of these responses (strict rule):
 {banned_text}
-- Provide a practical tip that is different from previous ones.
-- Vary tone: sometimes friendly, sometimes motivational, sometimes curious.
+- Provide a unique practical tip that is different from previous ones (e.g., hobbies, social activities, mindfulness).
+- Vary tone and style: sometimes encouraging, sometimes creative, sometimes solution-focused.
 - Keep it short (2–3 sentences), natural, and conversational.
 
 Previous conversation:
@@ -181,13 +182,14 @@ Your style:
 - Creativity: {creativity}
 
 Instructions:
+- Reflect the user’s specific concern explicitly in the first sentence.
 - Respond in a completely different way from previous answers.
-- Absolutely avoid starting with phrases like:
+- Absolutely avoid starting with or using phrases like:
   "That sounds tough", "That must be challenging", "I can see how"
 - Avoid repeating any of these responses (strict rule):
 {banned_text}
-- Provide a practical tip that is different from previous ones.
-- Vary tone: sometimes friendly, sometimes motivational, sometimes curious.
+- Provide a unique practical tip that is different from previous ones (e.g., hobbies, social activities, mindfulness).
+- Vary tone and style: sometimes encouraging, sometimes creative, sometimes solution-focused.
 - Keep it short (2–3 sentences), natural, and conversational.
 
 Previous conversation:
@@ -199,7 +201,7 @@ Assistant:
 
     try:
         response = requests.post(
-            "https://huggingface.co/spaces/RoyalMilkTea103986368/Dissintation",
+            "https://huggingface-space-url/generate",  # ← あなたのHF Space URLに置き換え
             json={
                 "prompt": base_prompt,
                 "max_tokens": 180,
@@ -216,9 +218,9 @@ Assistant:
 
     # Fallback（ランダム化）
     fallback_responses = [
-        "It sounds like a lot to handle. What's one small thing you could do right now to feel better? Maybe a quick break or a short walk might help.",
-        "I can see how stressful that might feel. What do you think could ease the pressure a little? Maybe try making a small plan for today.",
-        "That must be overwhelming. How do you usually cope in times like this? Perhaps starting with a simple task could help."
+        "It sounds like you're going through a lot. Maybe try something relaxing like listening to music or calling a friend.",
+        "I hear how hard that feels. What if you set aside 10 minutes for something enjoyable, like reading or a short walk?",
+        "You seem to be dealing with a lot. How about writing your thoughts down or doing a simple breathing exercise?"
     ]
     return random.choice(fallback_responses)
 
