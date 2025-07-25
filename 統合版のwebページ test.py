@@ -12,7 +12,8 @@ import math
 import requests
 import streamlit as st
 import json
-
+import random
+import requests
 
 # === Google Sheets 認証 ===
 creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
@@ -128,6 +129,7 @@ def determine_tone(profile, match=True):
 
     return tone, empathy, style, emotional, creativity
 
+
 def generate_response(user_input):
     # 危機対応
     crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
@@ -145,70 +147,53 @@ def generate_response(user_input):
     previous_ai_responses = [msg['content'] for msg in st.session_state.chat_history if msg['role'] == 'AI']
     banned_text = "\n".join(previous_ai_responses[-5:]) if previous_ai_responses else "None"
 
-    # プロンプト作成
+    # 提案カテゴリをランダムで選択
+    suggestion_categories = [
+        "Suggest a social activity like connecting with a friend or joining a group.",
+        "Suggest a creative hobby like painting, music, or journaling.",
+        "Suggest a mindfulness exercise like meditation or deep breathing.",
+        "Suggest a physical activity like walking, yoga, or stretching."
+    ]
+    chosen_category = random.choice(suggestion_categories)
+
+    # モード別性格スタイル
     if st.session_state.experiment_condition == "Fixed Empathy":
-        base_prompt = f"""
-You are an empathetic counselor chatbot.
-Always respond calmly, kindly, and consistently.
-
-Instructions:
-- Reflect the user’s specific concern explicitly in the first sentence.
-- Respond in a completely different way from previous answers.
-- Absolutely avoid starting with or using phrases like:
-  "That sounds tough", "That must be challenging", "I can see how"
-- Avoid repeating any of these responses (strict rule):
-{banned_text}
-- Provide a unique practical tip that is different from previous ones (e.g., hobbies, social activities, mindfulness).
-- Vary tone and style: sometimes encouraging, sometimes creative, sometimes solution-focused.
-- Keep it short (2–3 sentences), natural, and conversational.
-
-Previous conversation:
-{context}
-
-Current user message: {user_input}
-Assistant:
-"""
+        tone_instruction = "Maintain a calm, professional, and reassuring tone, like a licensed counselor."
     else:
         tone, empathy, style, emotional, creativity = determine_tone(profile, match=st.session_state["matched_mode"])
-        base_prompt = f"""
-You are a supportive chatbot for mental well-being.
-Respond in a natural, conversational tone.
+        tone_instruction = f"Reflect these traits in your tone: Tone={tone}, Empathy={empathy}, Structure={style}, Emotion={emotional}, Creativity={creativity}."
 
-Your style:
-- Tone: {tone}
-- Empathy: {empathy}
-- Structure: {style}
-- Emotional Expression: {emotional}
-- Creativity: {creativity}
+    # 改善されたプロンプト（ChatGPT風 + 性格反映）
+    base_prompt = f"""
+You are a supportive and intelligent assistant for mental well-being.
+{tone_instruction}
 
-Instructions:
-- Reflect the user’s specific concern explicitly in the first sentence.
-- Respond in a completely different way from previous answers.
-- Absolutely avoid starting with or using phrases like:
-  "That sounds tough", "That must be challenging", "I can see how"
-- Avoid repeating any of these responses (strict rule):
+Your goal: Respond naturally and personally, like ChatGPT, but with the specified personality.
+Follow these rules strictly:
+- Use at least one keyword from the user's message in your first sentence.
+- Avoid phrases like: "That sounds tough", "I understand", "It must be hard".
+- Keep tone natural and conversational, not robotic.
+- Structure:
+    1. Acknowledge the user's concern clearly using their own words or synonyms.
+    2. Ask a question that directly relates to their concern (NOT generic).
+    3. {chosen_category} — and explain in one short sentence why it fits their situation.
+- Ensure this response is different from previous ones:
 {banned_text}
-- Provide a unique practical tip that is different from previous ones (e.g., hobbies, social activities, mindfulness).
-- Vary tone and style: sometimes encouraging, sometimes creative, sometimes solution-focused.
-- Keep it short (2–3 sentences), natural, and conversational.
+- Keep it short (2–3 sentences), warm, and positive.
 
-Previous conversation:
+Conversation so far:
 {context}
 
-Current user message: {user_input}
+User's latest message: {user_input}
+
 Assistant:
 """
 
     try:
         response = requests.post(
-            "https://huggingface-space-url/generate",  # ← あなたのHF Space URLに置き換え
-            json={
-                "prompt": base_prompt,
-                "max_tokens": 180,
-                "temperature": 1.2,
-                "top_p": 1.0
-            },
-            timeout=20
+            "https://huggingface.co/spaces/RoyalMilkTea103986368/Dissintation/generate",
+            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 1.3, "top_p": 1.0},
+            timeout=25
         )
         result = response.json().get("response", "").strip()
         if result:
@@ -216,11 +201,11 @@ Assistant:
     except Exception:
         pass
 
-    # Fallback（ランダム化）
+    # Fallback（ユーザー入力を必ず含める）
     fallback_responses = [
-        "It sounds like you're going through a lot. Maybe try something relaxing like listening to music or calling a friend.",
-        "I hear how hard that feels. What if you set aside 10 minutes for something enjoyable, like reading or a short walk?",
-        "You seem to be dealing with a lot. How about writing your thoughts down or doing a simple breathing exercise?"
+        f"You mentioned '{user_input}'. How would reaching out to someone you trust feel? It often helps reduce stress because it creates connection.",
+        f"Thinking about '{user_input}' can feel heavy. What small step could make you feel better? Maybe journaling your thoughts can help organize them.",
+        f"Since '{user_input}' is on your mind, what if you tried a calming exercise like deep breathing? It helps reset your mood in just a few minutes."
     ]
     return random.choice(fallback_responses)
 
