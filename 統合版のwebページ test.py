@@ -128,9 +128,6 @@ def determine_tone(profile, match=True):
 
     return tone, empathy, style, emotional, creativity
 
-
-
-
 def generate_response(user_input):
     # 危機対応
     crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
@@ -143,38 +140,46 @@ def generate_response(user_input):
 
     profile = get_profile(user_name)
 
+    # 過去4ターンの履歴をまとめる（自然な流れのため）
+    context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
+
     # プロンプト生成
     if st.session_state.experiment_condition == "Fixed Empathy":
         base_prompt = f"""
-        You are an empathetic counselor chatbot.
-        Always respond calmly, kindly, and consistently.
-        Include empathy, a reflective question, and a small actionable suggestion.  
-        Keep it short and natural (2–3 sentences). Do not use bullet points or labels.
-        User: {user_input}
-        Assistant:
-        """
+You are an empathetic counselor chatbot.
+Always respond calmly, kindly, and consistently.
+Include empathy, a reflective question, and a small actionable suggestion.
+Keep it short and natural (2–3 sentences). Use varied phrasing and do not repeat previous wording.
+Previous conversation:
+{context}
+Current user message: {user_input}
+Assistant:
+"""
     else:
         tone, empathy, style, emotional, creativity = determine_tone(profile, match=st.session_state["matched_mode"])
         base_prompt = f"""
-        You are a supportive chatbot for mental well-being.
-        Respond in a natural, conversational tone.
-        Your style:
-        - Tone: {tone}
-        - Empathy: {empathy}
-        - Structure: {style}    
-        - Emotional Expression: {emotional}
-        - Creativity: {creativity}
+You are a supportive chatbot for mental well-being.
+Respond in a natural, conversational tone.
+Your style:
+- Tone: {tone}
+- Empathy: {empathy}
+- Structure: {style}
+- Emotional Expression: {emotional}
+- Creativity: {creativity}
 
-        Include empathy, a reflective question, and a practical tip in one smooth response.
-        Keep it concise (2–3 sentences). Do not use bullet points or labels.
-        User: {user_input}
-        Assistant:
-        """
+Include empathy, a reflective question, and a practical tip in one smooth response.
+Use varied language across turns, avoid repeating phrasing from previous answers.
+Keep it concise (2–3 sentences).
+Previous conversation:
+{context}
+Current user message: {user_input}
+Assistant:
+"""
 
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 0.8, "top_p": 0.9},
+            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 1.0, "top_p": 1.0},
             timeout=15
         )
         result = response.json().get("response", "").strip()
