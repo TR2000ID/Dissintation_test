@@ -155,26 +155,25 @@ def clean_response(text):
     return text.split("\n")[0].strip()
 
 def generate_response(user_input):
-    # 危機管理は現状通り
     crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
     if any(kw in user_input.lower() for kw in crisis_keywords):
-        return "(1) Empathy: I'm really sorry you're feeling this way.\n(2) Important: Please contact someone you trust or a crisis hotline immediately.\n(3) Helpline: In the US, dial 988. In the UK, call Samaritans at 116 123."
+        return "I'm really sorry you're feeling this way. You're not alone. Please consider reaching out to someone you trust or a crisis hotline."
 
     prohibited_keywords = ["diagnose", "diagnosis", "medication", "antidepressant", "pill", "prescribe"]
     if any(kw in user_input.lower() for kw in prohibited_keywords):
-        return "(1) Empathy: I understand your concern.\n(2) Question: Have you consulted a healthcare professional before?\n(3) Suggestion: For your safety, please seek professional medical advice."
+        return "I understand your concern. It might be best to discuss this with a healthcare professional for your safety."
 
-    # Big Five対応プロンプト
+    # Big Five → tone調整（任意）
     profile = get_profile(user_name)
-    tone = "Upbeat and motivating" if profile and int(profile.get("Extraversion", 50)) >= 60 else "Calm and reassuring"
-    structure = "Step-by-step advice" if profile and int(profile.get("Conscientiousness", 50)) >= 60 else "Simple tips"
+    tone = "friendly and uplifting" if profile and int(profile.get("Extraversion", 50)) >= 60 else "calm and reassuring"
 
     base_prompt = (
-        f"You are an empathetic mental health assistant.\n"
-        f"Tone: {tone}. Structure: {structure}.\n"
-        "Output format:\n"
-        "(1) Empathy\n(2) Reflective Question\n(3) Practical Suggestion\n"
-        "Do not add extra text before or after these 3 parts.\n"
+        f"You are a supportive and friendly assistant for mental well-being.\n"
+        f"Tone: {tone}.\n"
+        "Respond in a natural, conversational tone.\n"
+        "Include empathy, a reflective question, and a practical tip, but make it flow like normal conversation.\n"
+        "Keep it short (2–3 sentences).\n"
+        "Do not use numbered sections or labels.\n"
         f"User: {user_input}\n"
         "Assistant:"
     )
@@ -182,23 +181,15 @@ def generate_response(user_input):
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 0.8, "top_p": 0.9},
+            json={"prompt": base_prompt, "max_tokens": 200, "temperature": 0.8, "top_p": 0.9},
             timeout=15
         )
         result = response.json().get("response", "").strip()
-        cleaned = clean_response(result)
-
-        if cleaned and all(tag in cleaned for tag in ["(1)", "(2)", "(3)"]):
-            return cleaned
-        return random.choice([
-            "(1) Empathy: That sounds challenging.\n(2) Question: What small step could help right now?\n(3) Suggestion: Try a short breathing exercise.",
-            "(1) Empathy: I hear how tough this feels for you.\n(2) Question: What would make this a little easier?\n(3) Suggestion: Take a quick break and stretch for 5 minutes.",
-            "(1) Empathy: I'm here for you.\n(2) Question: What usually helps when you feel like this?\n(3) Suggestion: Write down three positive things from today."
-        ])
+        if result:
+            return result
 
     except Exception:
-        return "(1) Empathy: It sounds like a lot to manage.\n(2) Question: What's one thing you could do to feel a bit better?\n(3) Suggestion: Take a 5-minute breathing break."
-
+        return "That sounds tough. What do you think might make things feel a little easier? Maybe start with one small step, like taking a quick break."
 
 
 # === Personality Test ===
