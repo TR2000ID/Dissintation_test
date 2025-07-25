@@ -9,6 +9,10 @@ import uuid
 import time
 import random
 import math
+import requests
+import streamlit as st
+import json
+
 
 # === Google Sheets 認証 ===
 creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
@@ -49,11 +53,16 @@ if "session_id" not in st.session_state:
 if "turn_index" not in st.session_state:
     st.session_state.turn_index = 0
 
+# CounselorモードとBig Fiveモードを交互に振り分け
 if "experiment_condition" not in st.session_state:
-    st.session_state.experiment_condition = random.choice(["Fixed Empathy", "Personalized Empathy"])
+    user_count = len(existing_users)
+    st.session_state.experiment_condition = "Personalized Empathy" if user_count % 2 == 0 else "Fixed Empathy"
 
-if "matched_mode" not in st.session_state:
-    st.session_state["matched_mode"] = False
+
+# Big Fiveモードのとき、30ターンまでは逆マッチ、その後はマッチ
+if st.session_state.experiment_condition == "Personalized Empathy":
+    st.session_state["matched_mode"] = st.session_state.turn_index >= 30
+
 
 # === エラーハンドリング付きGoogle Sheets書き込み ===
 def safe_append(sheet, row, retries=3, delay=2):
@@ -96,63 +105,31 @@ def get_profile(user):
             return row
     return None
 
-# === Personaプロンプト生成 ===
-import requests
-import streamlit as st
-import json
+# === Personaプロンプト生成 
 
-def trait_level(score):
-    if score >= 60: return "High"
-    elif score >= 40: return "Moderate"
-    else: return "Low"
 
-def generate_persona_prompt(profile, match=True):
-    def level(score):
-        return "High" if score >= 60 else "Moderate" if score >= 40 else "Low"
+def determine_tone(profile, match=True):
+    def flip(value):
+        if value >= 60: return 20
+        if value <= 40: return 80
+        return 50
 
-    ex, ag, co, es, op = [level(int(profile.get(trait, 50))) for trait in
-                          ["Extraversion", "Agreeableness", "Conscientiousness", "Emotional Stability", "Openness"]]
+    def adjusted(trait):
+        val = int(profile.get(trait, 50))
+        return val if match else flip(val)
 
-    base_rules = (
-        "Follow these STRICT rules:\n"
-        "1. Response MUST have 3 parts:\n"
-        "(1) Empathy\n(2) Reflective Question\n(3) Practical Suggestion\n"
-        "2. Avoid medical, legal, or financial advice.\n"
-        "3. If user mentions self-harm → Give helpline info.\n"
-        "4. Avoid repetitive phrases; vary tone.\n"
-        "Keep response natural and human-like (max 3 sentences).\n"
-    )
+    ex, ag, co, es, op = [adjusted(t) for t in ["Extraversion", "Agreeableness", "Conscientiousness", "Emotional Stability", "Openness"]]
 
-    if not match:
-        return base_rules + "Respond in a neutral, practical tone with one coping tip only."
+    tone = "cheerful and engaging" if ex >= 60 else "calm and measured"
+    empathy = "warm and supportive" if ag >= 60 else "matter-of-fact and minimal empathy"
+    style = "clear and structured" if co >= 60 else "casual and flexible"
+    emotional = "steady and reassuring" if es >= 60 else "slightly anxious, hesitant tone"
+    creativity = "curious and imaginative" if op >= 60 else "practical and focused on familiar ideas"
 
-    tone = "Upbeat and motivating" if ex == "High" else "Friendly and balanced" if ex == "Moderate" else "Calm and reassuring"
-    empathy = "Show warmth and understanding" if ag != "Low" else "Keep empathy minimal but respectful"
-    structure = "Clear, step-by-step advice" if co == "High" else "Moderate structure" if co == "Moderate" else "Flexible suggestions"
-    optimism = "Encourage optimism" if es != "Low" else "Provide frequent reassurance"
-    creativity = "Include creative coping ideas" if op == "High" else "Mix practical and creative" if op == "Moderate" else "Stick to practical tips"
+    return tone, empathy, style, emotional, creativity
 
-    return (
-        f"{base_rules}\n"
-        "Tone and style settings:\n"
-        f"- Tone: {tone}\n"
-        f"- Empathy: {empathy}\n"
-        f"- Structure: {structure}\n"
-        f"- Optimism: {optimism}\n"
-        f"- Creativity: {creativity}\n"
-        "IMPORTANT: Do NOT skip (1)(2)(3). Each must be unique and context-aware."
-    )
 
-import difflib
-import re
 
-def clean_response(text):
-    # (1)(2)(3) の部分だけ抽出
-    matches = re.findall(r"\(1\).*?\(3\).*", text, re.DOTALL)
-    if matches:
-        return matches[0].strip()
-    # もしパターンが見つからなければテキストを短縮して返す
-    return text.split("\n")[0].strip()
 
 def generate_response(user_input):
     # 危機対応
@@ -164,21 +141,35 @@ def generate_response(user_input):
     if any(kw in user_input.lower() for kw in prohibited_keywords):
         return "I understand your concern. It might be best to discuss this with a healthcare professional for your safety."
 
-    # Big Fiveによるトーン調整
     profile = get_profile(user_name)
-    tone = "friendly and uplifting" if profile and int(profile.get("Extraversion", 50)) >= 60 else "calm and reassuring"
 
-    # プロンプト（自然な会話指示）
-    base_prompt = (
-        f"You are a supportive and friendly assistant for mental well-being.\n"
-        f"Tone: {tone}.\n"
-        "Respond in a natural, conversational tone.\n"
-        "Include empathy, a reflective question, and a practical tip, but make it flow like normal conversation.\n"
-        "Keep it concise (2–3 sentences).\n"
-        "Do not use numbered sections or labels.\n"
-        f"User: {user_input}\n"
-        "Assistant:"
-    )
+    # プロンプト生成
+    if st.session_state.experiment_condition == "Fixed Empathy":
+        base_prompt = f"""
+        You are an empathetic counselor chatbot.
+        Always respond calmly, kindly, and consistently.
+        Include empathy, a reflective question, and a small actionable suggestion.  
+        Keep it short and natural (2–3 sentences). Do not use bullet points or labels.
+        User: {user_input}
+        Assistant:
+        """
+    else:
+        tone, empathy, style, emotional, creativity = determine_tone(profile, match=st.session_state["matched_mode"])
+        base_prompt = f"""
+        You are a supportive chatbot for mental well-being.
+        Respond in a natural, conversational tone.
+        Your style:
+        - Tone: {tone}
+        - Empathy: {empathy}
+        - Structure: {style}    
+        - Emotional Expression: {emotional}
+        - Creativity: {creativity}
+
+        Include empathy, a reflective question, and a practical tip in one smooth response.
+        Keep it concise (2–3 sentences). Do not use bullet points or labels.
+        User: {user_input}
+        Assistant:
+        """
 
     try:
         response = requests.post(
@@ -187,14 +178,12 @@ def generate_response(user_input):
             timeout=15
         )
         result = response.json().get("response", "").strip()
-
         if result:
             return result
-
     except Exception:
         pass
 
-    # fallback（自然会話）
+    # fallback
     return "That sounds tough. What do you think might make things feel a little easier? Maybe start with one small step, like taking a quick break."
 
 
