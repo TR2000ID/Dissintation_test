@@ -140,27 +140,26 @@ def generate_response(user_input):
 
     profile = get_profile(user_name)
 
-    # 過去の履歴（最後の4ターン）
+    # 過去の履歴と禁止応答リスト
     context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
-
-    # 過去のAI応答（最大5件）
     previous_ai_responses = [msg['content'] for msg in st.session_state.chat_history if msg['role'] == 'AI']
     banned_text = "\n".join(previous_ai_responses[-5:]) if previous_ai_responses else "None"
 
-    # プロンプト生成
+    # プロンプト作成
     if st.session_state.experiment_condition == "Fixed Empathy":
         base_prompt = f"""
 You are an empathetic counselor chatbot.
 Always respond calmly, kindly, and consistently.
 
 Instructions:
-- Respond in a new and creative way for every turn.
-- Never start with the same phrase as before.
-- Completely rephrase and provide different suggestions each time.
+- Respond in a completely different way from previous answers.
+- Absolutely avoid starting with phrases like:
+  "That sounds tough", "That must be challenging", "I can see how"
 - Avoid repeating any of these responses (strict rule):
 {banned_text}
-- Include empathy, a reflective question, and a practical tip in one smooth response.
-- Keep it concise (2–3 sentences).
+- Provide a practical tip that is different from previous ones.
+- Vary tone: sometimes friendly, sometimes motivational, sometimes curious.
+- Keep it short (2–3 sentences), natural, and conversational.
 
 Previous conversation:
 {context}
@@ -182,13 +181,14 @@ Your style:
 - Creativity: {creativity}
 
 Instructions:
-- Respond in a new and creative way for every turn.
-- Never start with the same phrase as before.
-- Completely rephrase and provide different suggestions each time.
+- Respond in a completely different way from previous answers.
+- Absolutely avoid starting with phrases like:
+  "That sounds tough", "That must be challenging", "I can see how"
 - Avoid repeating any of these responses (strict rule):
 {banned_text}
-- Include empathy, a reflective question, and a practical tip in one smooth response.
-- Keep it concise (2–3 sentences).
+- Provide a practical tip that is different from previous ones.
+- Vary tone: sometimes friendly, sometimes motivational, sometimes curious.
+- Keep it short (2–3 sentences), natural, and conversational.
 
 Previous conversation:
 {context}
@@ -199,7 +199,7 @@ Assistant:
 
     try:
         response = requests.post(
-            "https://royalmilktea103986368-dissintation.hf.space/generate",
+            "https://huggingface.co/spaces/RoyalMilkTea103986368/Dissintation",
             json={
                 "prompt": base_prompt,
                 "max_tokens": 180,
@@ -214,11 +214,11 @@ Assistant:
     except Exception:
         pass
 
-    # fallback（毎回ランダムに異なる返答）
+    # Fallback（ランダム化）
     fallback_responses = [
-        "That sounds like a lot to handle. What’s one small thing you could do right now to feel better? Maybe a quick break or a short walk might help.",
-        "I can see how overwhelming that might feel. What do you think could ease the pressure a little? You could try making a small plan for today.",
-        "That must be challenging. How do you usually cope in times like this? Maybe starting with a deep breath or a simple task could help."
+        "It sounds like a lot to handle. What's one small thing you could do right now to feel better? Maybe a quick break or a short walk might help.",
+        "I can see how stressful that might feel. What do you think could ease the pressure a little? Maybe try making a small plan for today.",
+        "That must be overwhelming. How do you usually cope in times like this? Perhaps starting with a simple task could help."
     ]
     return random.choice(fallback_responses)
 
