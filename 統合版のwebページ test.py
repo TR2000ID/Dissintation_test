@@ -144,25 +144,27 @@ def generate_persona_prompt(profile, match=True):
     )
 
 import difflib
+import re
+
+def clean_response(text):
+    # (1)(2)(3) の部分だけ抽出
+    matches = re.findall(r"\(1\).*?\(3\).*", text, re.DOTALL)
+    if matches:
+        return matches[0].strip()
+    # もしパターンが見つからなければテキストを短縮して返す
+    return text.split("\n")[0].strip()
+
 def generate_response(user_input):
-    # 危機管理（即時応答）
+    # 危機管理は現状通り
     crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
     if any(kw in user_input.lower() for kw in crisis_keywords):
-        return (
-            "(1) Empathy: I'm really sorry you're feeling this way. You are not alone.\n"
-            "(2) Important: Please contact someone you trust or a crisis hotline immediately.\n"
-            "(3) Helpline: In the US, dial 988. In the UK, call Samaritans at 116 123."
-        )
+        return "(1) Empathy: I'm really sorry you're feeling this way.\n(2) Important: Please contact someone you trust or a crisis hotline immediately.\n(3) Helpline: In the US, dial 988. In the UK, call Samaritans at 116 123."
 
     prohibited_keywords = ["diagnose", "diagnosis", "medication", "antidepressant", "pill", "prescribe"]
     if any(kw in user_input.lower() for kw in prohibited_keywords):
-        return (
-            "(1) Empathy: I understand your concern.\n"
-            "(2) Question: Have you consulted a healthcare professional before?\n"
-            "(3) Suggestion: For your safety, please seek professional medical advice."
-        )
+        return "(1) Empathy: I understand your concern.\n(2) Question: Have you consulted a healthcare professional before?\n(3) Suggestion: For your safety, please seek professional medical advice."
 
-    # Big Fiveを反映した簡潔プロンプト
+    # Big Five対応プロンプト
     profile = get_profile(user_name)
     tone = "Upbeat and motivating" if profile and int(profile.get("Extraversion", 50)) >= 60 else "Calm and reassuring"
     structure = "Step-by-step advice" if profile and int(profile.get("Conscientiousness", 50)) >= 60 else "Simple tips"
@@ -170,45 +172,33 @@ def generate_response(user_input):
     base_prompt = (
         f"You are an empathetic mental health assistant.\n"
         f"Tone: {tone}. Structure: {structure}.\n"
-        "Respond in 3 parts:\n"
+        "Output format:\n"
         "(1) Empathy\n(2) Reflective Question\n(3) Practical Suggestion\n"
-        "Avoid medical, legal, or financial advice.\n"
+        "Do not add extra text before or after these 3 parts.\n"
         f"User: {user_input}\n"
         "Assistant:"
     )
 
-    fallback_responses = [
-        "(1) Empathy: That sounds challenging.\n(2) Question: What small step could help right now?\n(3) Suggestion: Try a short breathing exercise.",
-        "(1) Empathy: I hear how tough this feels for you.\n(2) Question: What would make this a little easier?\n(3) Suggestion: Take a quick break and stretch for 5 minutes.",
-        "(1) Empathy: I'm here for you.\n(2) Question: What usually helps when you feel like this?\n(3) Suggestion: Write down three positive things from today."
-    ]
+    try:
+        response = requests.post(
+            "https://royalmilktea103986368-dissintation.hf.space/generate",
+            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 0.8, "top_p": 0.9},
+            timeout=15
+        )
+        result = response.json().get("response", "").strip()
+        cleaned = clean_response(result)
 
-    for attempt in range(3):
-        try:
-            response = requests.post(
-                "https://royalmilktea103986368-dissintation.hf.space/generate",
-                json={"prompt": base_prompt, "max_tokens": 200, "temperature": 0.85, "top_p": 0.9},
-                timeout=15
-            )
-            if response.status_code != 200:
-                time.sleep(1.5 * (attempt + 1))
-                continue
+        if cleaned and all(tag in cleaned for tag in ["(1)", "(2)", "(3)"]):
+            return cleaned
+        return random.choice([
+            "(1) Empathy: That sounds challenging.\n(2) Question: What small step could help right now?\n(3) Suggestion: Try a short breathing exercise.",
+            "(1) Empathy: I hear how tough this feels for you.\n(2) Question: What would make this a little easier?\n(3) Suggestion: Take a quick break and stretch for 5 minutes.",
+            "(1) Empathy: I'm here for you.\n(2) Question: What usually helps when you feel like this?\n(3) Suggestion: Write down three positive things from today."
+        ])
 
-            result = response.json().get("response", "").strip()
-            result = result.replace(base_prompt, "").strip()  # クリーンアップ
+    except Exception:
+        return "(1) Empathy: It sounds like a lot to manage.\n(2) Question: What's one thing you could do to feel a bit better?\n(3) Suggestion: Take a 5-minute breathing break."
 
-            if result and all(tag in result for tag in ["(1)", "(2)", "(3)"]):
-                return result
-
-            if result:
-                return result + "\n\n" + random.choice(fallback_responses)
-
-        except requests.Timeout:
-            st.warning(f"Attempt {attempt+1}: API timeout.")
-        except Exception as e:
-            st.error(f"Attempt {attempt+1} failed: {e}")
-
-    return random.choice(fallback_responses)
 
 
 # === Personality Test ===
