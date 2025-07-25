@@ -107,174 +107,98 @@ def trait_level(score):
     else: return "Low"
 
 def generate_persona_prompt(profile, match=True):
-    # Convert Big Five scores to High/Moderate/Low
-    def trait_level(score):
-        if score >= 60: return "High"
-        elif score >= 40: return "Moderate"
-        return "Low"
+    def level(score):
+        return "High" if score >= 60 else "Moderate" if score >= 40 else "Low"
 
-    ex_level = trait_level(int(profile.get("Extraversion", 50)))
-    ag_level = trait_level(int(profile.get("Agreeableness", 50)))
-    co_level = trait_level(int(profile.get("Conscientiousness", 50)))
-    es_level = trait_level(int(profile.get("Emotional Stability", 50)))
-    op_level = trait_level(int(profile.get("Openness", 50)))
+    ex, ag, co, es, op = [level(int(profile.get(trait, 50))) for trait in
+                          ["Extraversion", "Agreeableness", "Conscientiousness", "Emotional Stability", "Openness"]]
 
-    # ✅ Safety & Ethical Rules
-    safety_instructions = (
-        "IMPORTANT RULES:\n"
-        "- Do NOT provide medical diagnosis or mention medications.\n"
-        "- Do NOT give legal or financial advice.\n"
-        "- If the user mentions self-harm or suicide, respond with empathy and refer to crisis hotlines.\n"
-        "- Avoid repetitive phrasing; use varied sentence structures for each response.\n"
+    base_rules = (
+        "Follow these STRICT rules:\n"
+        "1. Response MUST have 3 parts:\n"
+        "(1) Empathy\n(2) Reflective Question\n(3) Practical Suggestion\n"
+        "2. Avoid medical, legal, or financial advice.\n"
+        "3. If user mentions self-harm → Give helpline info.\n"
+        "4. Avoid repetitive phrases; vary tone.\n"
+        "Keep response natural and human-like (max 3 sentences).\n"
     )
 
-    # ✅ Fixed Empathy Mode
-    if st.session_state.experiment_condition == "Fixed Empathy":
-        return (
-            f"{safety_instructions}\n"
-            "You are a helpful, empathetic mental health assistant.\n"
-            "Write responses in a conversational, warm, and natural tone.\n"
-            "Structure your response in 3 parts:\n"
-            "(1) Empathy: Use varied empathetic expressions (avoid repeating the same phrase).\n"
-            "(2) Question: Ask a reflective question relevant to the user’s concern.\n"
-            "(3) Suggestion: Provide a practical coping tip that feels fresh and not generic.\n"
-            "Ensure diversity across sessions by avoiding repetitive intros and tips."
-        )
+    if not match:
+        return base_rules + "Respond in a neutral, practical tone with one coping tip only."
 
-    # ✅ Personalized Mode
-    if match:
-        tone_instruction = (
-            "Tone: "
-            + ("Energetic and motivating" if ex_level == "High" else
-               "Friendly and balanced" if ex_level == "Moderate" else
-               "Calm and soothing")
-        )
-        empathy_instruction = (
-            "Empathy: "
-            + ("Show warmth and deep understanding" if ag_level == "High" else
-               "Show supportive but measured empathy" if ag_level == "Moderate" else
-               "Show minimal but respectful empathy")
-        )
-        structure_instruction = (
-            "Structure: "
-            + ("Provide clear step-by-step guidance" if co_level == "High" else
-               "Provide moderately structured advice" if co_level == "Moderate" else
-               "Offer flexible, open-ended suggestions")
-        )
-        optimism_instruction = (
-            "Optimism: "
-            + ("Add light optimism" if es_level == "High" else
-               "Encourage optimism gently" if es_level == "Moderate" else
-               "Provide frequent reassurance")
-        )
-        creativity_instruction = (
-            "Creativity: "
-            + ("Suggest creative and unique coping ideas" if op_level == "High" else
-               "Include a mix of practical and creative ideas" if op_level == "Moderate" else
-               "Stick to practical, evidence-based suggestions")
-        )
+    tone = "Upbeat and motivating" if ex == "High" else "Friendly and balanced" if ex == "Moderate" else "Calm and reassuring"
+    empathy = "Show warmth and understanding" if ag != "Low" else "Keep empathy minimal but respectful"
+    structure = "Clear, step-by-step advice" if co == "High" else "Moderate structure" if co == "Moderate" else "Flexible suggestions"
+    optimism = "Encourage optimism" if es != "Low" else "Provide frequent reassurance"
+    creativity = "Include creative coping ideas" if op == "High" else "Mix practical and creative" if op == "Moderate" else "Stick to practical tips"
 
-        return (
-            f"{safety_instructions}\n"
-            "You are an adaptive AI mental health assistant.\n"
-            "Guidelines:\n"
-            f"- {tone_instruction}\n"
-            f"- {empathy_instruction}\n"
-            f"- {structure_instruction}\n"
-            f"- {optimism_instruction}\n"
-            f"- {creativity_instruction}\n\n"
-            "Response format (must follow exactly):\n"
-            "(1) Empathy: Use a unique empathetic sentence (avoid repetition).\n"
-            "(2) Question: Ask a reflective, context-relevant question.\n"
-            "(3) Suggestion: Provide one actionable coping tip (avoid overused tips).\n"
-            "Ensure language feels natural, human-like, and different each time."
-        )
-
-    # ✅ Non-Match Mode
     return (
-        f"{safety_instructions}\n"
-        "Respond in a short, direct, and practical way without emotional tone.\n"
-        "Give only one simple coping tip related to the user’s problem.\n"
-        "Example: 'Break your work into smaller steps and focus on one at a time.'"
+        f"{base_rules}\n"
+        "Tone and style settings:\n"
+        f"- Tone: {tone}\n"
+        f"- Empathy: {empathy}\n"
+        f"- Structure: {structure}\n"
+        f"- Optimism: {optimism}\n"
+        f"- Creativity: {creativity}\n"
+        "IMPORTANT: Do NOT skip (1)(2)(3). Each must be unique and context-aware."
     )
-
 
 import difflib
-
 def generate_response(user_input):
-    crisis_keywords = [
-        "suicide", "kill myself", "end my life", "self-harm",
-        "can't go on", "hopeless", "worthless", "life is meaningless", "give up"
-    ]
+    # Crisis handling
+    crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
     if any(kw in user_input.lower() for kw in crisis_keywords):
         return (
             "(1) Empathy: I'm really sorry you're feeling this way. You are not alone.\n"
-            "(2) Important: If you are in danger or thinking about self-harm, please reach out immediately.\n"
-            "(3) Helplines: In the US, call 988. In the UK, call Samaritans at 116 123. "
-            "If elsewhere, search for your local crisis hotline."
+            "(2) Important: Please contact someone you trust or a crisis hotline immediately.\n"
+            "(3) Helpline: In the US, dial 988. In the UK, call Samaritans at 116 123."
         )
 
     prohibited_keywords = ["diagnose", "diagnosis", "medication", "antidepressant", "pill", "prescribe"]
     if any(kw in user_input.lower() for kw in prohibited_keywords):
         return (
             "(1) Empathy: I understand your concern.\n"
-            "(2) Note: I cannot provide medical diagnosis or medication advice.\n"
-            "(3) Suggestion: Please consult a licensed healthcare professional for these matters."
+            "(2) Question: Have you consulted a healthcare professional before?\n"
+            "(3) Suggestion: For your safety, please seek professional medical advice."
         )
 
-    with st.spinner("Generating response... Please wait."):
-        profile = get_profile(user_name)
-        history_len = len(st.session_state.chat_history) // 2
-        if not st.session_state["matched_mode"] and history_len >= MAX_NONMATCH_ROUNDS:
-            st.session_state["matched_mode"] = True
+    profile = get_profile(user_name)
+    persona_prompt = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
+    prompt = f"{persona_prompt}\nUser: {user_input}\nAssistant:"
 
-        persona_prompt = generate_persona_prompt(profile, match=st.session_state["matched_mode"])
-        prompt = (
-            f"EXPERIMENT CONDITION: {st.session_state.experiment_condition}, "
-            f"MATCH: {st.session_state['matched_mode']}\n"
-            f"{persona_prompt}\n\n"
-            "Rules:\n"
-            "- Keep tone natural and empathetic.\n"
-            "- Avoid repeating same phrasing.\n"
-            f"User: {user_input}\nAssistant:"
-        )
+    fallback_responses = [
+        "(1) Empathy: That sounds challenging.\n(2) Question: What small step could help right now?\n(3) Suggestion: Try a short breathing exercise.",
+        "(1) Empathy: I hear how tough this feels for you.\n(2) Question: What would make this a little easier?\n(3) Suggestion: Take a quick break and stretch for 5 minutes.",
+        "(1) Empathy: I'm here for you.\n(2) Question: What usually helps when you feel like this?\n(3) Suggestion: Write down three positive things from today."
+    ]
 
-        max_tokens = 200 if "detail" in user_input.lower() else 160
-
-        for attempt in range(3):
-            try:
-                response = requests.post(
-                    "https://royalmilktea103986368-dissintation.hf.space/generate",
-                    json={"prompt": prompt, "max_tokens": max_tokens, "temperature": 0.95, "top_p": 0.9},
-                    timeout=120
-                )
-
-                if response.status_code != 200:
-                    st.warning(f"API Error: {response.status_code} on attempt {attempt+1}")
-                    continue
-
-                data = response.json()
-                result = data.get("response", "").strip()
-
-                if not result:
-                    st.warning("Empty response from API.")
-                    continue
-
-                lines = [l.strip() for l in result.splitlines() if l.strip()]
-
-                if "(1)" in result and "(2)" in result and "(3)" in result:
-                    return result
-
-                if len(lines) >= 3:
-                    return "\n".join(lines[:3])
-
-                return result
-
-            except Exception as e:
-                st.error(f"Exception on attempt {attempt+1}: {e}")
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                "https://royalmilktea103986368-dissintation.hf.space/generate",
+                json={"prompt": prompt, "max_tokens": 180, "temperature": 0.85, "top_p": 0.9},
+                timeout=60
+            )
+            if response.status_code != 200:
+                time.sleep(1.5 * (attempt + 1))  # Backoff
                 continue
 
-        return "Sorry, the assistant is currently unavailable. Please try entering one more time. If that doesn't work, contact Ryosuke Komatsu to look into the issue."
+            result = response.json().get("response", "").strip()
+            if all(tag in result for tag in ["(1)", "(2)", "(3)"]):
+                return result
+
+            # If partial tags missing → add fallback structure
+            return result + "\n\n" + random.choice(fallback_responses)
+
+        except requests.Timeout:
+            st.warning(f"Attempt {attempt+1}: API timeout.")
+        except Exception as e:
+            st.error(f"Attempt {attempt+1} failed: {e}")
+
+    # Final fallback
+    return random.choice(fallback_responses)
+
+
 
 
 # === Personality Test ===
