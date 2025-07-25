@@ -140,18 +140,31 @@ def generate_response(user_input):
 
     profile = get_profile(user_name)
 
-    # 過去4ターンの履歴をまとめる（自然な流れのため）
+    # 過去の履歴（最後の4ターン）
     context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
+
+    # 過去のAI応答（最大5件）
+    previous_ai_responses = [msg['content'] for msg in st.session_state.chat_history if msg['role'] == 'AI']
+    banned_text = "\n".join(previous_ai_responses[-5:]) if previous_ai_responses else "None"
 
     # プロンプト生成
     if st.session_state.experiment_condition == "Fixed Empathy":
         base_prompt = f"""
 You are an empathetic counselor chatbot.
 Always respond calmly, kindly, and consistently.
-Include empathy, a reflective question, and a small actionable suggestion.
-Keep it short and natural (2–3 sentences). Use varied phrasing and do not repeat previous wording.
+
+Instructions:
+- Respond in a new and creative way for every turn.
+- Never start with the same phrase as before.
+- Completely rephrase and provide different suggestions each time.
+- Avoid repeating any of these responses (strict rule):
+{banned_text}
+- Include empathy, a reflective question, and a practical tip in one smooth response.
+- Keep it concise (2–3 sentences).
+
 Previous conversation:
 {context}
+
 Current user message: {user_input}
 Assistant:
 """
@@ -160,6 +173,7 @@ Assistant:
         base_prompt = f"""
 You are a supportive chatbot for mental well-being.
 Respond in a natural, conversational tone.
+
 Your style:
 - Tone: {tone}
 - Empathy: {empathy}
@@ -167,11 +181,18 @@ Your style:
 - Emotional Expression: {emotional}
 - Creativity: {creativity}
 
-Include empathy, a reflective question, and a practical tip in one smooth response.
-Use varied language across turns, avoid repeating phrasing from previous answers.
-Keep it concise (2–3 sentences).
+Instructions:
+- Respond in a new and creative way for every turn.
+- Never start with the same phrase as before.
+- Completely rephrase and provide different suggestions each time.
+- Avoid repeating any of these responses (strict rule):
+{banned_text}
+- Include empathy, a reflective question, and a practical tip in one smooth response.
+- Keep it concise (2–3 sentences).
+
 Previous conversation:
 {context}
+
 Current user message: {user_input}
 Assistant:
 """
@@ -179,8 +200,13 @@ Assistant:
     try:
         response = requests.post(
             "https://royalmilktea103986368-dissintation.hf.space/generate",
-            json={"prompt": base_prompt, "max_tokens": 180, "temperature": 1.0, "top_p": 1.0},
-            timeout=15
+            json={
+                "prompt": base_prompt,
+                "max_tokens": 180,
+                "temperature": 1.2,
+                "top_p": 1.0
+            },
+            timeout=20
         )
         result = response.json().get("response", "").strip()
         if result:
@@ -188,8 +214,13 @@ Assistant:
     except Exception:
         pass
 
-    # fallback
-    return "That sounds tough. What do you think might make things feel a little easier? Maybe start with one small step, like taking a quick break."
+    # fallback（毎回ランダムに異なる返答）
+    fallback_responses = [
+        "That sounds like a lot to handle. What’s one small thing you could do right now to feel better? Maybe a quick break or a short walk might help.",
+        "I can see how overwhelming that might feel. What do you think could ease the pressure a little? You could try making a small plan for today.",
+        "That must be challenging. How do you usually cope in times like this? Maybe starting with a deep breath or a simple task could help."
+    ]
+    return random.choice(fallback_responses)
 
 
 # === Personality Test ===
