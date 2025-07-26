@@ -9,11 +9,6 @@ import uuid
 import time
 import random
 import math
-import requests
-import streamlit as st
-import json
-import random
-import requests
 
 # === Google Sheets 認証 ===
 creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
@@ -30,22 +25,6 @@ client = gspread.authorize(credentials)
 spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
 chat_sheet = spreadsheet.worksheet("Chat")
 profile_sheet = spreadsheet.worksheet("Personality")
-existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
-
-# === ユーザー認証 ===
-if "user_name" not in st.session_state:
-    st.session_state.user_name = ""
-
-if st.session_state.user_name == "":
-    st.session_state.user_name = st.sidebar.text_input("Enter your username")
-    if not st.session_state.user_name:
-        st.warning("Please enter your username.")
-        st.stop()
-else:
-    st.sidebar.markdown(f"**Welcome, {st.session_state.user_name}!**")
-
-user_name = st.session_state.user_name
-page = "Chat" if user_name in existing_users else "Personality Test"
 
 # === セッション管理 ===
 if "session_id" not in st.session_state:
@@ -54,18 +33,10 @@ if "session_id" not in st.session_state:
 if "turn_index" not in st.session_state:
     st.session_state.turn_index = 0
 
-# CounselorモードとBig Fiveモードを交互に振り分け
-if "experiment_condition" not in st.session_state:
-    user_count = len(existing_users)
-    st.session_state.experiment_condition = "Personalized Empathy" if user_count % 2 == 0 else "Fixed Empathy"
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-
-# Big Fiveモードのとき、30ターンまでは逆マッチ、その後はマッチ
-if st.session_state.experiment_condition == "Personalized Empathy":
-    st.session_state["matched_mode"] = st.session_state.turn_index >= 30
-
-
-# === エラーハンドリング付きGoogle Sheets書き込み ===
+# === Google Sheets 安全書き込み ===
 def safe_append(sheet, row, retries=3, delay=2):
     for i in range(retries):
         try:
@@ -75,40 +46,13 @@ def safe_append(sheet, row, retries=3, delay=2):
             time.sleep(delay * (i + 1))
     st.error("Failed to log data after multiple retries.")
 
-def get_or_create_worksheet(spreadsheet, title, rows=100, cols=20):
-    """
-    指定したタイトルのワークシートが存在すれば取得し、
-    存在しなければ新規作成してヘッダー行を追加する。
-    """
-    try:
-        # 既存のシートを取得
-        return spreadsheet.worksheet(title)
-    except gspread.WorksheetNotFound:
-        # シートがなければ作成
-        ws = spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
-        # ヘッダー行を追加
-        ws.append_row([
-            "SessionID", "Username", "Role", "Message", "Timestamp",
-            "ExperimentCondition", "MatchedMode",
-            "Extraversion", "Agreeableness", "Conscientiousness",
-            "Emotional Stability", "Openness"
-        ])
-        return ws
-
-
-# === パラメータ ===
-MAX_NONMATCH_ROUNDS = 30
-
-# === Big Five結果取得 ===
 def get_profile(user):
     for row in profile_sheet.get_all_records():
         if row["Username"] == user:
             return row
     return None
 
-# === Personaプロンプト生成 
-
-
+# === Big Fiveトーン ===
 def determine_tone(profile, match=True):
     def flip(value):
         if value >= 60: return 20
@@ -124,102 +68,73 @@ def determine_tone(profile, match=True):
     tone = "cheerful and engaging" if ex >= 60 else "calm and measured"
     empathy = "warm and supportive" if ag >= 60 else "matter-of-fact and minimal empathy"
     style = "clear and structured" if co >= 60 else "casual and flexible"
-    emotional = "steady and reassuring" if es >= 60 else "slightly anxious, hesitant tone"
-    creativity = "curious and imaginative" if op >= 60 else "practical and focused on familiar ideas"
+    emotional = "steady and reassuring" if es >= 60 else "slightly anxious"
+    creativity = "curious and imaginative" if op >= 60 else "practical and focused"
 
     return tone, empathy, style, emotional, creativity
 
-def generate_response(user_input):
-    """
-    Generates a response using Hugging Face API.
-    If the API fails or returns an empty response, clearly inform the user in English.
-    """
+def generate_personalized_suggestion(profile):
+    ex = int(profile.get("Extraversion", 50))
+    ag = int(profile.get("Agreeableness", 50))
+    co = int(profile.get("Conscientiousness", 50))
+    es = int(profile.get("Emotional Stability", 50))
+    op = int(profile.get("Openness", 50))
 
-    # ✅ Crisis Handling
-    crisis_keywords = ["suicide", "kill myself", "end my life", "self-harm"]
-    if any(kw in user_input.lower() for kw in crisis_keywords):
-        return "I'm really sorry you're feeling this way. You're not alone. Please consider reaching out to someone you trust or a crisis hotline."
-
-    prohibited_keywords = ["diagnose", "diagnosis", "medication", "antidepressant", "pill", "prescribe"]
-    if any(kw in user_input.lower() for kw in prohibited_keywords):
-        return "I understand your concern. It might be best to discuss this with a healthcare professional for your safety."
-
-    # ✅ User profile
-    profile = get_profile(user_name)
-
-    # ✅ Context and banned text
-    context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
-    previous_ai_responses = [msg['content'] for msg in st.session_state.chat_history if msg['role'] == 'AI']
-    banned_text = "\n".join(previous_ai_responses[-5:]) if previous_ai_responses else "None"
-
-    # ✅ Suggestion category (random)
-    suggestion_categories = [
-        "Suggest a social activity like connecting with a friend or joining a group.",
-        "Suggest a creative hobby like painting, music, or journaling.",
-        "Suggest a mindfulness exercise like meditation or deep breathing.",
-        "Suggest a physical activity like walking, yoga, or stretching."
-    ]
-    chosen_category = random.choice(suggestion_categories)
-
-    # ✅ Tone based on mode
-    if st.session_state.experiment_condition == "Fixed Empathy":
-        tone_instruction = "Maintain a calm, professional, and reassuring tone, like a licensed counselor."
+    if ex >= 60:
+        return "Call or meet a friend for a quick chat to feel connected."
+    elif op >= 60:
+        return "Try journaling or a creative activity to express yourself."
+    elif co >= 60:
+        return "Make a simple to-do list to regain control and focus."
+    elif ag >= 60:
+        return "Reach out to someone you trust for emotional support."
     else:
-        tone, empathy, style, emotional, creativity = determine_tone(profile, match=st.session_state["matched_mode"])
-        tone_instruction = f"Reflect these traits STRONGLY: Tone={tone}, Empathy={empathy}, Style={style}, Emotion={emotional}, Creativity={creativity}."
+        return "Start with a calming breathing exercise to ease your mind."
 
-    # ✅ Prompt for Hugging Face API
-    base_prompt = f"""
-You are a supportive and intelligent assistant for mental well-being.
-{tone_instruction}
 
-Your goal: Respond naturally and personally, like ChatGPT, with the specified personality.
-Follow these strict rules:
-- Begin by using at least one keyword from the user's message in your first sentence.
-- Avoid phrases like: "That sounds tough", "I understand", "It must be hard", "It can be overwhelming".
-- Make it conversational and natural (not robotic).
-- Structure:
-    1. Acknowledge the user's concern using their words.
-    2. Ask a question directly related to their concern (NOT generic).
-    3. {chosen_category} — AND explain briefly why it helps.
-- Always include one sentence explaining why the suggestion could help.
-- Ensure this response is different from previous ones:
-{banned_text}
-- Keep it short (2–3 sentences), warm, and positive.
+# === 危機対応 ===
+def handle_crisis(user_input):
+    keywords = ["suicide", "kill myself", "end my life", "self-harm"]
+    if any(kw in user_input.lower() for kw in keywords):
+        return "I'm really sorry you're feeling this way. You're not alone. Please contact someone you trust or a hotline."
+    return None
+
+def build_prompt(user_input, context, tone_instruction, suggestion):
+    return f"""
+You are a supportive assistant for mental well-being.
+STRICTLY follow this personality style: {tone_instruction}
+Keep it warm and natural. Avoid generic empathy like "I understand".
+Write exactly 2–3 sentences: acknowledge concern, ask a question, and suggest this action: {suggestion}.
+Explain briefly why it helps. Do NOT repeat these instructions.
 
 Conversation so far:
 {context}
-
 User's latest message: {user_input}
-
 Assistant:
-"""
+""".strip()
 
-    # ✅ API Request
+
+def call_api(prompt):
     API_URL = "https://royalmilktea103986368-dissintation.hf.space/generate"
-    payload = {
-        "prompt": base_prompt,
-        "max_tokens": 180,
-        "temperature": 1.3,
-        "top_p": 1.0
-    }
+    payload = {"prompt": prompt, "max_tokens": 150, "temperature": 0.7, "top_p": 0.9}
+    for attempt in range(3):
+        try:
+            r = requests.post(API_URL, json=payload, timeout=30)
+            if r.status_code == 200:
+                text = r.json().get("response", "").strip()
+                if text:
+                    return text.split("Assistant:")[-1].replace("\n\n", "\n").strip()
+        except:
+            time.sleep(2)
+    return None
 
-    try:
-        response = requests.post(API_URL, json=payload, timeout=30)
-        if response.status_code == 200:
-            result = response.json().get("response", "").strip()
-            if result:
-                return result
-            else:
-                st.error("⚠️ API returned status 200 but no response text. Please check backend logic.")
-                return "System could not generate a response. The AI returned an empty message."
-        else:
-            st.error(f"⚠️ API Error: Status Code {response.status_code}. Please check Hugging Face Space logs.")
-            return f"System could not generate a response (Error {response.status_code}). Please try again."
-    except Exception as e:
-        st.error(f"⚠️ Connection Error: {str(e)}")
-        return "System could not generate a response due to a connection error. Please retry later."
+# === ユーザーとページ管理 ===
+user_name = st.sidebar.text_input("Enter your username")
+if not user_name:
+    st.warning("Please enter your username.")
+    st.stop()
 
+page = st.sidebar.radio("Select Page", ["Personality Test", "Chat Session"])
 
 # === Personality Test ===
 if page == "Personality Test":
@@ -370,52 +285,45 @@ if page == "Personality Test":
                 page = "Chat"
                 st.experimental_rerun()
 
-if page == "Chat":
+
+# === Chatページ ===
+if page == "Chat Session":
     st.title(f"Chatbot - {user_name}")
-
-    # チャット履歴初期化
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    # ユーザープロフィール取得
     profile = get_profile(user_name)
     if not profile:
-        st.error("No profile found. Please take the test first.")
+        st.error("No personality profile found. Please take the personality test first.")
         st.stop()
 
-    # ユーザー入力受付
-    user_input = st.chat_input("Your message")
-
+    user_input = st.chat_input("Your message...")
     if user_input:
         st.session_state.turn_index += 1
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        ai_reply = generate_response(user_input)
-        st.session_state.chat_history.append({"role": "User", "content": user_input})
-        st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
+        context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
 
-        # 個別タブ
-        tab_name = f"{user_name}_{'Match' if st.session_state['matched_mode'] else 'NoMatch'}"
-        user_sheet = get_or_create_worksheet(spreadsheet, tab_name)
+    # モード設定
+    if st.session_state.get("experiment_condition", "Fixed Empathy") == "Fixed Empathy":
+        tone_instruction = "Respond in a calm, supportive tone, like a counselor."
+    else:
+        tone, empathy, style, emotional, creativity = determine_tone(profile, match=(st.session_state.turn_index >= 30))
+        tone_instruction = f"Respond in a {tone}, {empathy} way. Keep tone {emotional} and include {creativity} ideas."
 
-        # 個別ログ＋共通ログ
-        for role, message in [("user", user_input), ("bot", ai_reply)]:
-            safe_append(user_sheet, [
-                st.session_state.session_id, user_name, role, message, now,
-                st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
-                profile.get("Extraversion", ""), profile.get("Agreeableness", ""), profile.get("Conscientiousness", ""),
-                profile.get("Emotional Stability", ""), profile.get("Openness", "")
-            ])
-            safe_append(chat_sheet, [
-                st.session_state.session_id, user_name, role, message, now,
-                st.session_state["experiment_condition"], st.session_state.get("matched_mode", False),
-                profile.get("Extraversion", ""), profile.get("Agreeableness", ""), profile.get("Conscientiousness", ""),
-                profile.get("Emotional Stability", ""), profile.get("Openness", "")
-            ])
+    # 性格連動提案追加
+    suggestion = generate_personalized_suggestion(profile)
 
-    # チャット履歴を常に表示
+    # 危機対応チェック
+    crisis_msg = handle_crisis(user_input)
+    if crisis_msg:
+        ai_reply = crisis_msg
+    else:
+        prompt = build_prompt(user_input, context, tone_instruction, suggestion)
+        ai_reply = call_api(prompt) or "The system could not generate a response. Try again later."
+
+    st.session_state.chat_history.append({"role": "User", "content": user_input})
+    st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
+
+
+
     for msg in st.session_state.chat_history:
         st.chat_message(msg["role"].lower()).write(msg["content"])
-
 
 # === Admin Debug Panel ===
 if user_name.lower() == "admin":
