@@ -134,7 +134,15 @@ if not user_name:
     st.warning("Please enter your username.")
     st.stop()
 
-page = st.sidebar.radio("Select Page", ["Personality Test", "Chat Session"])
+# ✅ experiment_condition 初期化
+if "experiment_condition" not in st.session_state:
+    # 新規ユーザーを交互に分ける（固定ロジック）
+    all_profiles = profile_sheet.get_all_records()
+    st.session_state.experiment_condition = "Fixed Empathy" if len(all_profiles) % 2 == 0 else "Personalized Empathy"
+
+# ✅ ページ自動選択
+profile = get_profile(user_name)
+page = "Chat Session" if profile else "Personality Test"
 
 # === Personality Test ===
 if page == "Personality Test":
@@ -299,27 +307,25 @@ if page == "Chat Session":
         st.session_state.turn_index += 1
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
 
-    # モード設定
-    if st.session_state.get("experiment_condition", "Fixed Empathy") == "Fixed Empathy":
-        tone_instruction = "Respond in a calm, supportive tone, like a counselor."
-    else:
-        tone, empathy, style, emotional, creativity = determine_tone(profile, match=(st.session_state.turn_index >= 30))
-        tone_instruction = f"Respond in a {tone}, {empathy} way. Keep tone {emotional} and include {creativity} ideas."
 
-    # 性格連動提案追加
-    suggestion = generate_personalized_suggestion(profile)
+        # モード設定
+        if st.session_state.get("experiment_condition") == "Fixed Empathy":
+            tone_instruction = "Respond in a calm, supportive tone, like a counselor."
+        else:
+            tone, empathy, style, emotional, creativity = determine_tone(profile, match=(st.session_state.turn_index >= 30))
+            tone_instruction = f"Respond in a {tone}, {empathy} way. Keep tone {emotional} and include {creativity} ideas."
 
-    # 危機対応チェック
-    crisis_msg = handle_crisis(user_input)
-    if crisis_msg:
-        ai_reply = crisis_msg
-    else:
-        prompt = build_prompt(user_input, context, tone_instruction, suggestion)
-        ai_reply = call_api(prompt) or "The system could not generate a response. Try again later."
+        suggestion = generate_personalized_suggestion(profile)
 
-    st.session_state.chat_history.append({"role": "User", "content": user_input})
-    st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
+        crisis_msg = handle_crisis(user_input)
+        if crisis_msg:
+            ai_reply = crisis_msg
+        else:
+            prompt = build_prompt(user_input, context, tone_instruction, suggestion)
+            ai_reply = call_api(prompt) or "The system could not generate a response. Try again later."
 
+        st.session_state.chat_history.append({"role": "User", "content": user_input})
+        st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
 
     for msg in st.session_state.chat_history:
