@@ -52,8 +52,17 @@ def get_profile(user):
             return row
     return None
 
-# === Big Fiveトーン ===
+
+#Penley & Tomaka 2002, Carver & Connor-Smith 2010, Stewart 2000, Frontiers 2023
+# === Big Fiveトーン + 複合パターン対応 ===
+import random
+
 def determine_tone(profile, match=True):
+    """
+    Determine chatbot's tone and special instructions based on Big Five profile.
+    Includes complex logic for combined traits with scientifically-backed coping strategies.
+    """
+
     def flip(value):
         if value >= 60: return 20
         if value <= 40: return 80
@@ -63,33 +72,71 @@ def determine_tone(profile, match=True):
         val = int(profile.get(trait, 50))
         return val if match else flip(val)
 
-    ex, ag, co, es, op = [adjusted(t) for t in ["Extraversion", "Agreeableness", "Conscientiousness", "Emotional Stability", "Openness"]]
+    # === Big Fiveスコア取得 ===
+    ex = adjusted("Extraversion")
+    ag = adjusted("Agreeableness")
+    co = adjusted("Conscientiousness")
+    es = adjusted("Emotional Stability")  # Nの逆数扱い
+    op = adjusted("Openness")
 
+    # === 基本トーン設定 ===
     tone = "cheerful and engaging" if ex >= 60 else "calm and measured"
-    empathy = "warm and supportive" if ag >= 60 else "matter-of-fact and minimal empathy"
+    empathy = "warm and supportive" if ag >= 60 else "matter-of-fact but polite"
     style = "clear and structured" if co >= 60 else "casual and flexible"
-    emotional = "steady and reassuring" if es >= 60 else "slightly anxious"
-    creativity = "curious and imaginative" if op >= 60 else "practical and focused"
+    emotional = "steady and reassuring" if es >= 60 else "gentle and calming"
+    creativity = "curious and imaginative" if op >= 60 else "practical and simple"
 
-    return tone, empathy, style, emotional, creativity
+    # === 特殊指示（複合ロジック）===
+    special_options = []
 
-def generate_personalized_suggestion(profile):
-    ex = int(profile.get("Extraversion", 50))
-    ag = int(profile.get("Agreeableness", 50))
-    co = int(profile.get("Conscientiousness", 50))
-    es = int(profile.get("Emotional Stability", 50))
-    op = int(profile.get("Openness", 50))
+    if es <= 40 and co <= 40:  # 高Neuroticism + 低Conscientiousness
+        special_options = [
+            "Suggest breaking tasks into small steps and reframing stress as a challenge.",
+            "Encourage time-blocking and positive self-talk to reduce anxiety.",
+            "Promote structured coping like writing a short to-do list."
+        ]
+    elif ex >= 60 and co <= 40:  # 高Extraversion + 低Conscientiousness
+        special_options = [
+            "Encourage fun social activities like a group game or walk.",
+            "Suggest joining a recurring social hobby to combine fun with light structure.",
+            "Promote energizing tasks with friends instead of risky coping."
+        ]
+    elif es <= 40 and ex <= 40:  # 高Neuroticism + 低Extraversion (Type D)
+        special_options = [
+            "Suggest safe emotional expression like journaling or anonymous chat.",
+            "Encourage mindfulness and deep breathing to reduce tension.",
+            "Promote gradual social exposure in low-pressure settings."
+        ]
+    elif ex >= 60 and co >= 60:  # 高Extraversion + 高Conscientiousness
+        special_options = [
+            "Suggest setting a short-term goal and achieving it with a friend.",
+            "Promote joining a team activity that requires planning.",
+            "Encourage group problem-solving challenges for positive focus."
+        ]
+    elif ag >= 60:  # 高Agreeableness
+        special_options = [
+            "Suggest reaching out to a supportive friend for a quick chat.",
+            "Encourage helping someone else, which boosts self-efficacy.",
+            "Promote cooperative activities that build social bonds."
+        ]
+    elif op >= 60:  # 高Openness
+        special_options = [
+            "Suggest trying a creative outlet like drawing or music.",
+            "Promote mindfulness-based activities or learning a new hobby.",
+            "Encourage reframing stress as a chance to explore new ideas."
+        ]
 
-    if ex >= 60:
-        return "Call or meet a friend for a quick chat to feel connected."
-    elif op >= 60:
-        return "Try journaling or a creative activity to express yourself."
-    elif co >= 60:
-        return "Make a simple to-do list to regain control and focus."
-    elif ag >= 60:
-        return "Reach out to someone you trust for emotional support."
-    else:
-        return "Start with a calming breathing exercise to ease your mind."
+    # === ランダム選択 or デフォルト ===
+    special_instruction = random.choice(special_options) if special_options else "Provide a practical, empathetic tip."
+
+    return {
+        "tone": tone,
+        "empathy": empathy,
+        "style": style,
+        "emotional": emotional,
+        "creativity": creativity,
+        "special_instruction": special_instruction
+    }
 
 
 # === 危機対応 ===
@@ -99,24 +146,25 @@ def handle_crisis(user_input):
         return "I'm really sorry you're feeling this way. You're not alone. Please contact someone you trust or a hotline."
     return None
 
-def build_prompt(user_input, context, tone_instruction, suggestion):
+def build_prompt(user_input, context, tone_instruction, profile_summary):
     return f"""
-You are a supportive assistant for mental well-being.
-STRICTLY follow this personality style: {tone_instruction}
-Keep it warm and natural. Avoid generic empathy like "I understand".
-Write exactly 2–3 sentences: acknowledge concern, ask a question, and suggest this action: {suggestion}.
-Explain briefly why it helps. Do NOT repeat these instructions.
-
+You are a mental well-being assistant.
+Reflect these traits strongly: {tone_instruction}.
+Respond in 2–3 sentences:
+1. Acknowledge the user's concern using their words.
+2. Ask a relevant question.
+3. Suggest ONE action tailored to their personality ({profile_summary}) and explain why it helps.
+Avoid phrases like "I understand". Use a warm, natural tone.
 Conversation so far:
 {context}
-User's latest message: {user_input}
+User's message: {user_input}
 Assistant:
 """.strip()
 
 
 def call_api(prompt):
     API_URL = "https://royalmilktea103986368-dissintation.hf.space/generate"
-    payload = {"prompt": prompt, "max_tokens": 150, "temperature": 0.7, "top_p": 0.9}
+    payload = {"prompt": prompt, "max_tokens": 180, "temperature": 0.9, "top_p": 0.95}
     for attempt in range(3):
         try:
             r = requests.post(API_URL, json=payload, timeout=30)
@@ -315,13 +363,30 @@ if page == "Chat Session":
             tone, empathy, style, emotional, creativity = determine_tone(profile, match=(st.session_state.turn_index >= 30))
             tone_instruction = f"Respond in a {tone}, {empathy} way. Keep tone {emotional} and include {creativity} ideas."
 
-        suggestion = generate_personalized_suggestion(profile)
 
         crisis_msg = handle_crisis(user_input)
         if crisis_msg:
             ai_reply = crisis_msg
         else:
-            prompt = build_prompt(user_input, context, tone_instruction, suggestion)
+            profile_summary = f"Extraversion={profile['Extraversion']}, Agreeableness={profile['Agreeableness']}, Conscientiousness={profile['Conscientiousness']}, Emotional Stability={profile['Emotional Stability']}, Openness={profile['Openness']}"
+
+            prompt = f"""
+            You are a warm, supportive mental health assistant.
+            Reflect this personality style: {tone_instruction}.
+            Write ONLY the reply (no notes). Use 2–3 short, natural sentences:
+            1) Refer to ONE keyword from user's message.
+            2) Acknowledge their feeling using their words.
+            3) Ask ONE specific question.
+            4) Suggest ONE practical action based on their personality ({profile_summary}) and explain why briefly.
+            Avoid phrases like "I understand". Keep tone conversational.
+            Conversation so far:
+            {context}
+            User: {user_input}
+            Assistant:
+            """
+
+
+
             ai_reply = call_api(prompt) or "The system could not generate a response. Try again later."
 
         st.session_state.chat_history.append({"role": "User", "content": user_input})
