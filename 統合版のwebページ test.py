@@ -360,8 +360,12 @@ if page == "Chat Session":
         if st.session_state.get("experiment_condition") == "Fixed Empathy":
             tone_instruction = "Respond in a calm, supportive tone, like a counselor."
         else:
-            tone, empathy, style, emotional, creativity = determine_tone(profile, match=(st.session_state.turn_index >= 30))
-            tone_instruction = f"Respond in a {tone}, {empathy} way. Keep tone {emotional} and include {creativity} ideas."
+            tone_data = determine_tone(profile, match=(st.session_state.turn_index >= 30))
+            tone_instruction = (
+                f"Respond in a {tone_data['tone']}, {tone_data['empathy']} way. "
+                f"Keep tone {tone_data['emotional']} and include {tone_data['creativity']} ideas. "
+                f"{tone_data['special_instruction']}"
+            )
 
 
         crisis_msg = handle_crisis(user_input)
@@ -371,21 +375,20 @@ if page == "Chat Session":
             profile_summary = f"Extraversion={profile['Extraversion']}, Agreeableness={profile['Agreeableness']}, Conscientiousness={profile['Conscientiousness']}, Emotional Stability={profile['Emotional Stability']}, Openness={profile['Openness']}"
 
             prompt = f"""
-            You are a warm, supportive mental health assistant.
-            Reflect this personality style: {tone_instruction}.
-            Write ONLY the reply (no notes). Use 2–3 short, natural sentences:
-            1) Refer to ONE keyword from user's message.
-            2) Acknowledge their feeling using their words.
-            3) Ask ONE specific question.
-            4) Suggest ONE practical action based on their personality ({profile_summary}) and explain why briefly.
-            Avoid phrases like "I understand". Keep tone conversational.
-            Conversation so far:
-            {context}
-            User: {user_input}
-            Assistant:
-            """
-
-
+You are a warm, supportive mental health assistant.
+Reflect this personality style: {tone_instruction}.
+Write ONLY the reply in 2–3 sentences:
+- Start with ONE keyword from user's message.
+- Acknowledge their feeling naturally.
+- Ask ONE question relevant to their situation.
+- Suggest ONE coping action tailored to their personality ({profile_summary}) and briefly explain why it helps.
+Avoid phrases like "I understand" or "That sounds tough".
+Keep it empathetic, practical, and conversational.
+Conversation so far:
+{context}
+User: {user_input}
+Assistant:
+"""
 
             ai_reply = call_api(prompt) or "The system could not generate a response. Try again later."
 
