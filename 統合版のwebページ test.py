@@ -357,7 +357,7 @@ User: {user_input}
 Assistant:
 """
 
-            ai_reply = call_api(prompt) or "The system could not generate a response. Try again later."
+            ai_reply = call_api(prompt) or "The system could not generate a response. Try again. If that doesn't work conatact Ryosuke Komatsu"
 
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
