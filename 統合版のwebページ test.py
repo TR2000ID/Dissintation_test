@@ -69,31 +69,32 @@ def determine_tone(profile, match=True):
     emotional = "steady and reassuring" if es >= 60 else "gentle and calming"
     creativity = "curious and imaginative" if op >= 60 else "practical and simple"
 
-    special_options = []
-    if es <= 40 and co <= 40:
-        special_options = ["Suggest breaking tasks into small steps and reframing stress as a challenge.",
-                           "Encourage time-blocking and positive self-talk to reduce anxiety."]
-    elif ex >= 60 and co <= 40:
-        special_options = ["Encourage fun social activities like a group game or walk.",
-                           "Suggest joining a recurring social hobby to combine fun with light structure."]
-    elif es <= 40 and ex <= 40:
-        special_options = ["Suggest safe emotional expression like journaling or anonymous chat.",
-                           "Encourage mindfulness and deep breathing to reduce tension."]
-    elif ex >= 60 and co >= 60:
-        special_options = ["Suggest setting a short-term goal and achieving it with a friend.",
-                           "Promote joining a team activity that requires planning."]
-    elif ag >= 60:
-        special_options = ["Suggest reaching out to a supportive friend for a quick chat.",
-                           "Encourage helping someone else, which boosts self-efficacy."]
-    elif op >= 60:
-        special_options = ["Suggest trying a creative outlet like drawing or music.",
-                           "Promote mindfulness-based activities or learning a new hobby."]
+    # Personality-based coping instructions
+    suggestions_map = []
+    if es <= 40 and co <= 40:  # 高N＋低C
+        suggestions_map.append("Try breaking big tasks into small steps and reframe stress as a challenge.")
+    if ex >= 60 and co <= 40:  # 高E＋低C
+        suggestions_map.append("Plan a fun social activity that gives you energy but adds a little structure.")
+    if es <= 40 and ex <= 40:  # 高N＋低E（Type D）
+        suggestions_map.append("Express your feelings safely, like journaling, or try a mindfulness break.")
+    if ex >= 60 and co >= 60:
+        suggestions_map.append("Set a short-term goal and tackle it with a friend to stay motivated.")
+    if ag >= 60:
+        suggestions_map.append("Reach out to a supportive friend or help someone else—it can lift your mood.")
+    if op >= 60:
+        suggestions_map.append("Try a creative outlet like art or music, or explore a new hobby.")
 
-    special_instruction = " | ".join(random.sample(special_options, min(2, len(special_options)))) if special_options else \
-        "Provide 2 practical coping tips clearly tied to personality."
+    # Combine 2 suggestions randomly
+    if not suggestions_map:
+        suggestions_map.append("Offer practical coping ideas based on their personality.")
+    special_instruction = " ".join(random.sample(suggestions_map, min(2, len(suggestions_map))))
 
     return {
-        "tone": tone, "empathy": empathy, "style": style, "emotional": emotional, "creativity": creativity,
+        "tone": tone,
+        "empathy": empathy,
+        "style": style,
+        "emotional": emotional,
+        "creativity": creativity,
         "special_instruction": special_instruction
     }
 
