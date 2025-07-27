@@ -58,83 +58,42 @@ def get_profile(user):
 import random
 
 def determine_tone(profile, match=True):
-    """
-    Determine chatbot's tone and special instructions based on Big Five profile.
-    Includes complex logic for combined traits with scientifically-backed coping strategies.
-    """
+    def flip(value): return 20 if value >= 60 else 80 if value <= 40 else 50
+    def adjusted(trait): return int(profile.get(trait, 50)) if match else flip(int(profile.get(trait, 50)))
 
-    def flip(value):
-        if value >= 60: return 20
-        if value <= 40: return 80
-        return 50
+    ex, ag, co, es, op = [adjusted(t) for t in ["Extraversion","Agreeableness","Conscientiousness","Emotional Stability","Openness"]]
 
-    def adjusted(trait):
-        val = int(profile.get(trait, 50))
-        return val if match else flip(val)
-
-    # === Big Fiveスコア取得 ===
-    ex = adjusted("Extraversion")
-    ag = adjusted("Agreeableness")
-    co = adjusted("Conscientiousness")
-    es = adjusted("Emotional Stability")  # Nの逆数扱い
-    op = adjusted("Openness")
-
-    # === 基本トーン設定 ===
     tone = "cheerful and engaging" if ex >= 60 else "calm and measured"
     empathy = "warm and supportive" if ag >= 60 else "matter-of-fact but polite"
     style = "clear and structured" if co >= 60 else "casual and flexible"
     emotional = "steady and reassuring" if es >= 60 else "gentle and calming"
     creativity = "curious and imaginative" if op >= 60 else "practical and simple"
 
-    # === 特殊指示（複合ロジック）===
     special_options = []
+    if es <= 40 and co <= 40:
+        special_options = ["Suggest breaking tasks into small steps and reframing stress as a challenge.",
+                           "Encourage time-blocking and positive self-talk to reduce anxiety."]
+    elif ex >= 60 and co <= 40:
+        special_options = ["Encourage fun social activities like a group game or walk.",
+                           "Suggest joining a recurring social hobby to combine fun with light structure."]
+    elif es <= 40 and ex <= 40:
+        special_options = ["Suggest safe emotional expression like journaling or anonymous chat.",
+                           "Encourage mindfulness and deep breathing to reduce tension."]
+    elif ex >= 60 and co >= 60:
+        special_options = ["Suggest setting a short-term goal and achieving it with a friend.",
+                           "Promote joining a team activity that requires planning."]
+    elif ag >= 60:
+        special_options = ["Suggest reaching out to a supportive friend for a quick chat.",
+                           "Encourage helping someone else, which boosts self-efficacy."]
+    elif op >= 60:
+        special_options = ["Suggest trying a creative outlet like drawing or music.",
+                           "Promote mindfulness-based activities or learning a new hobby."]
 
-    if es <= 40 and co <= 40:  # 高Neuroticism + 低Conscientiousness
-        special_options = [
-            "Suggest breaking tasks into small steps and reframing stress as a challenge.",
-            "Encourage time-blocking and positive self-talk to reduce anxiety.",
-            "Promote structured coping like writing a short to-do list."
-        ]
-    elif ex >= 60 and co <= 40:  # 高Extraversion + 低Conscientiousness
-        special_options = [
-            "Encourage fun social activities like a group game or walk.",
-            "Suggest joining a recurring social hobby to combine fun with light structure.",
-            "Promote energizing tasks with friends instead of risky coping."
-        ]
-    elif es <= 40 and ex <= 40:  # 高Neuroticism + 低Extraversion (Type D)
-        special_options = [
-            "Suggest safe emotional expression like journaling or anonymous chat.",
-            "Encourage mindfulness and deep breathing to reduce tension.",
-            "Promote gradual social exposure in low-pressure settings."
-        ]
-    elif ex >= 60 and co >= 60:  # 高Extraversion + 高Conscientiousness
-        special_options = [
-            "Suggest setting a short-term goal and achieving it with a friend.",
-            "Promote joining a team activity that requires planning.",
-            "Encourage group problem-solving challenges for positive focus."
-        ]
-    elif ag >= 60:  # 高Agreeableness
-        special_options = [
-            "Suggest reaching out to a supportive friend for a quick chat.",
-            "Encourage helping someone else, which boosts self-efficacy.",
-            "Promote cooperative activities that build social bonds."
-        ]
-    elif op >= 60:  # 高Openness
-        special_options = [
-            "Suggest trying a creative outlet like drawing or music.",
-            "Promote mindfulness-based activities or learning a new hobby.",
-            "Encourage reframing stress as a chance to explore new ideas."
-        ]
-
-    # === ランダム選択 or デフォルト ===
-    special_instruction = random.choice(special_options) if special_options else "Provide a practical, empathetic tip."
+    special_instruction = " | ".join(random.sample(special_options, min(2, len(special_options)))) if special_options else \
+        "Provide 2 practical coping tips clearly tied to personality."
 
     return {
-        "tone": tone,
-        "empathy": empathy,
-        "style": style,
-        "emotional": emotional,
-        "creativity": creativity,
+        "tone": tone, "empathy": empathy, "style": style, "emotional": emotional, "creativity": creativity,
         "special_instruction": special_instruction
     }
 
@@ -372,15 +331,23 @@ if page == "Chat Session":
         if crisis_msg:
             ai_reply = crisis_msg
         else:
-            profile_summary = f"Extraversion={profile['Extraversion']}, Agreeableness={profile['Agreeableness']}, Conscientiousness={profile['Conscientiousness']}, Emotional Stability={profile['Emotional Stability']}, Openness={profile['Openness']}"
+            profile_summary = ", ".join([
+                f"Extraversion={profile.get('Extraversion', 'N/A')}",
+                f"Agreeableness={profile.get('Agreeableness', 'N/A')}",
+                f"Conscientiousness={profile.get('Conscientiousness', 'N/A')}",
+                f"Emotional Stability={profile.get('Emotional Stability', 'N/A')}",
+                f"Openness={profile.get('Openness', 'N/A')}"
+            ])
+
 
             prompt = f"""
 You are a warm, supportive mental health assistant.
 Reflect this personality style: {tone_instruction}.
-Write ONLY the reply in 2–3 sentences:
-- Start with ONE keyword from user's message.
-- Acknowledge their feeling naturally.
-- Ask ONE question relevant to their situation.
+Strictly follow this format in your response:
+1. First sentence: Use ONE keyword from user's message naturally.
+2. Second sentence: Ask ONE question linked to their concern.
+3. Third sentence: Suggest ONE coping action tied to personality ({profile_summary}), with WHY it helps.
+(Do NOT include instructions or lists in the output.)
 - Suggest ONE coping action tailored to their personality ({profile_summary}) and briefly explain why it helps.
 Avoid phrases like "I understand" or "That sounds tough".
 Keep it empathetic, practical, and conversational.
