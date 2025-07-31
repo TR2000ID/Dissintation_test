@@ -22,7 +22,7 @@ scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
 client = gspread.authorize(credentials)
 
-spreadsheet = client.open_by_key("35b4b14b2e1fe98a817a4d85baf146241f097369")
+spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
 chat_sheet = spreadsheet.worksheet("Chat")
 profile_sheet = spreadsheet.worksheet("Personality")
 
