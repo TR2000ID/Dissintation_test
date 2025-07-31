@@ -26,6 +26,12 @@ spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
 chat_sheet = spreadsheet.worksheet("Chat")
 profile_sheet = spreadsheet.worksheet("Personality")
 
+def log_chat_to_sheet(user, session_id, turn_index, user_msg, ai_msg):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = [user, session_id, turn_index, timestamp, user_msg, ai_msg]
+    safe_append(chat_sheet, row)
+
+
 # === セッション管理 ===
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -124,7 +130,7 @@ Assistant:
 
 def call_api(prompt):
     API_URL = "https://royalmilktea103986368-dissintation.hf.space/generate"
-    payload = {"prompt": prompt, "max_tokens": 180, "temperature": 0.9, "top_p": 0.95}
+    payload = {"prompt": prompt, "max_tokens": 180, "temperature": 0.7, "top_p": 0.95}
     for attempt in range(3):
         try:
             r = requests.post(API_URL, json=payload, timeout=30)
@@ -347,9 +353,8 @@ Reflect this personality style: {tone_instruction}.
 Write a natural, conversational response in 2–3 sentences:
 - Acknowledge the user's concern using their own words.
 - Ask ONE relevant question to keep the conversation going.
-- Suggest ONE practical coping tip connected to their personality and briefly explain why it helps.
 Avoid sounding like a list. Make it flow like a real chat.
-- Suggest ONE coping action tailored to their personality ({profile_summary}) and briefly explain why it helps.
+-Suggest ONE practical coping tip based on their personality ({profile_summary}) and briefly explain why it helps.
 Avoid phrases like "I understand" or "That sounds tough".
 Keep it empathetic, practical, and conversational.
 Conversation so far:
@@ -362,6 +367,14 @@ Assistant:
 
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
+
+        log_chat_to_sheet(
+            user=user_name,
+            session_id=st.session_state.session_id,
+            turn_index=st.session_state.turn_index,
+            user_msg=user_input,
+            ai_msg=ai_reply
+        )
 
 
     for msg in st.session_state.chat_history:
