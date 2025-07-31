@@ -28,8 +28,19 @@ profile_sheet = spreadsheet.worksheet("Personality")
 
 def log_chat_to_sheet(user, session_id, turn_index, user_msg, ai_msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    row = [user, session_id, turn_index, timestamp, user_msg, ai_msg]
-    safe_append(chat_sheet, row)
+    experiment = st.session_state.get("experiment_condition", "Unknown")
+    matched = "Matched" if st.session_state.get("matched_mode", False) else "NoMatch"
+    
+    sheet_name = f"{user}_{matched}"
+    try:
+        user_sheet = spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        user_sheet = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="7")
+        user_sheet.append_row(["SessionID", "Username", "Role", "Message", "Timestamp", "ExperimentCondition", "MatchedMode"])
+    
+    user_sheet.append_row([session_id, user, "User", user_msg, timestamp, experiment, matched])
+    user_sheet.append_row([session_id, user, "AI", ai_msg, timestamp, experiment, matched])
+
 
 
 # === セッション管理 ===
