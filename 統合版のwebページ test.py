@@ -47,11 +47,36 @@ def log_chat_to_sheet(user, session_id, turn_index, user_msg, ai_msg):
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
+# アンケート表示状態の初期化
+if "survey_prompts_shown" not in st.session_state:
+    st.session_state.survey_prompts_shown = {
+        "initial": False,
+        "30": False,
+        "60": False,
+        "90": False
+    }
+
+
 if "turn_index" not in st.session_state:
     st.session_state.turn_index = 0
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+
+# 初回アンケートのお願い（チャット開始前）
+if not st.session_state.survey_prompts_shown["initial"]:
+    with st.form("initial_survey_form"):
+        st.info("Before starting the chat, would you be willing to complete a short survey?")
+        answer = st.radio("Survey Consent", ["Yes", "No"])
+        submit = st.form_submit_button("Submit")
+        if submit:
+            st.session_state.survey_prompts_shown["initial"] = True
+            if answer == "Yes":
+                st.success("Thank you! Please fill out the form: [Survey Link](https://example.com/survey_initial)")
+            else:
+                st.info("No problem, you can continue to the chat.")
+            st.stop()  # ユーザーが回答するまで進ませない
+
 
 # === Google Sheets 安全書き込み ===
 def safe_append(sheet, row, retries=3, delay=2):
@@ -159,11 +184,15 @@ if not user_name:
     st.warning("Please enter your username.")
     st.stop()
 
-# ✅ experiment_condition 初期化
-if "experiment_condition" not in st.session_state:
-    # 新規ユーザーを交互に分ける（固定ロジック）
-    all_profiles = profile_sheet.get_all_records()
-    st.session_state.experiment_condition = "Fixed Empathy" if len(all_profiles) % 2 == 0 else "Personalized Empathy"
+# すでに登録されているユーザーか確認
+existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
+if st.session_state.user_name in existing_users:
+    user_row = next(row for row in profile_sheet.get_all_records() if row["Username"] == st.session_state.user_name)
+    st.session_state.experiment_condition = user_row["Condition"]
+else:
+    # 新規ユーザー：偶数/奇数で割り当て
+    st.session_state.experiment_condition = "Fixed Empathy" if len(existing_users) % 2 == 0 else "Personalized Empathy"
+
 
 # ✅ ページ自動選択
 profile = get_profile(user_name)
@@ -374,7 +403,7 @@ User: {user_input}
 Assistant:
 """
 
-            ai_reply = call_api(prompt) or "The system could not generate a response. Try again. If that doesn't work conatact Ryosuke Komatsu"
+        ai_reply = call_api(prompt) or "The system could not generate a response. Try again. If that doesn't work conatact Ryosuke Komatsu"
 
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
@@ -386,6 +415,23 @@ Assistant:
             user_msg=user_input,
             ai_msg=ai_reply
         )
+
+        # アンケートリンクを一元管理
+        survey_links = {
+        "initial": "https://forms.gle/PtfRCrwwVfrGuxEQ9",
+        "30": "https://forms.gle/aDpHpj15gxWfu24s6",
+        "60": "https://forms.gle/8byChpdXQS4azgXH6",
+        "90": "https://forms.gle/PB9JVdD5jmytwxTJA"
+        }
+
+        # 回数ベースでアンケートを案内（30, 60, 90ターン）
+        turn = st.session_state.turn_index
+        for milestone in [30, 60, 90]:
+            key = str(milestone)
+            if turn == milestone and not st.session_state.survey_prompts_shown.get(key, False):
+                st.session_state.survey_prompts_shown[key] = True
+                st.warning(f"You've reached {milestone} messages! We’d appreciate it if you could fill out a quick follow-up survey.")
+                st.markdown(f"[Click here for the {milestone}th message survey]({survey_links[key]})")
 
 
     for msg in st.session_state.chat_history:
