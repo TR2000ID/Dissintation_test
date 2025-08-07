@@ -191,7 +191,7 @@ st.session_state.user_name = user_name
 existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
 if st.session_state.user_name in existing_users:
     user_row = next(row for row in profile_sheet.get_all_records() if row["Username"] == st.session_state.user_name)
-    st.session_state.experiment_condition = user_row["Condition"]
+    st.session_state.experiment_condition = user_row["ExperimentCondition"]
 else:
     # 新規ユーザー：偶数/奇数で割り当て
     st.session_state.experiment_condition = "Fixed Empathy" if len(existing_users) % 2 == 0 else "Personalized Empathy"
