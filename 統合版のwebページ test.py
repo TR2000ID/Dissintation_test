@@ -184,6 +184,9 @@ if not user_name:
     st.warning("Please enter your username.")
     st.stop()
 
+st.session_state.user_name = user_name
+
+
 # すでに登録されているユーザーか確認
 existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
 if st.session_state.user_name in existing_users:
