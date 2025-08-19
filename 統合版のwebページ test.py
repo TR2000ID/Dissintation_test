@@ -177,46 +177,62 @@ def determine_tone(profile, match=True):
 
 # ==== ここから Big5Chat ベースの擬似ユーザー生成 & 自動会話シミュレーション ==== #
 
-BIG5_PATH = "data/big5_chat/big5_chat_dataset.csv"  # アップロード済みのパスに合わせて
+BIG5_PATH = "data/big5_chat/big5_chat_dataset_prepped.csv"  # アップロード済みのパスに合わせて
 
 def load_big5chat():
-    """
-    Big5Chat を読み込む。想定カラム（ゆるく対応）:
-      - ユーザー発話: いずれか ["text","utterance","message","user_text","content","sentence"]
-      - 特性: Extraversion/Agreeableness/Conscientiousness/Emotional Stability/Openness
-             または略称 E/A/C/N/O（大文字小文字OK）
-    """
-    # 1) CSV読込（区切りやエンコーディング差異にも軽く対応）
+    import numpy as np
+    # 1) 読み込み（文字コードや区切りの揺れも吸収）
     try:
         df = pd.read_csv(BIG5_PATH)
     except UnicodeDecodeError:
         df = pd.read_csv(BIG5_PATH, encoding="utf-8-sig")
     except Exception:
-        # もし ; 区切り等ならこの行を使う想定
         df = pd.read_csv(BIG5_PATH, sep=None, engine="python")
 
-    # 2) 列名標準化（前後空白/大小を吸収）
     df.columns = [c.strip() for c in df.columns]
 
-    # 3) 発話列の候補から1つ見つけて text にリネーム
-    text_candidates = ["text", "utterance", "message", "user_text", "content", "sentence"]
-    found_text = None
-    for c in text_candidates:
-        # 大小文字差を吸収
-        hit = [col for col in df.columns if col.lower() == c.lower()]
-        if hit:
-            found_text = hit[0]
-            break
-    if found_text is None:
-        st.error(
-            f"Big5Chat: ユーザー発話列が見つかりません。候補={text_candidates} / 実際の列={list(df.columns)}\n"
-            "CSVのヘッダ名を上記いずれかに揃えるか、この関数の text_candidates を追加してください。"
-        )
-        # ここで止める（以降の処理でエラーになるため）
+    # 2) ユーザー発話列を推定して 'text' に統一
+    #    ← あなたのCSVヘッダに合わせて候補を拡張
+    text_candidates = [
+        "train_input", "narrative", "literal",  # ← 追加
+        "text", "utterance", "message", "user_text", "content", "sentence"
+    ]
+    text_col = next((c for c in text_candidates if c in df.columns), None)
+    if text_col is None:
+        st.error(f"発話列が見つかりません。候補={text_candidates} / 実列={list(df.columns)}")
         st.stop()
+    if text_col != "text":
+        df = df.rename(columns={text_col: "text"})
 
-    if found_text != "text":
-        df = df.rename(columns={found_text: "text"})
+    # 3) Big5 列を準備（無ければ 50 で埋める）
+    big5 = ["Extraversion","Agreeableness","Conscientiousness","Emotional Stability","Openness"]
+    for t in big5:
+        if t not in df.columns:
+            df[t] = 50
+
+    # 4) trait/level がある場合は簡易に数値化（high=80, medium=50, low=20）して該当特性のみ上書き
+    trait_map = {
+        "e":"Extraversion","extraversion":"Extraversion",
+        "a":"Agreeableness","agreeableness":"Agreeableness",
+        "c":"Conscientiousness","conscientiousness":"Conscientiousness",
+        "n":"Emotional Stability","neuroticism":"Emotional Stability","emotional stability":"Emotional Stability",
+        "o":"Openness","openness":"Openness",
+    }
+    level_map = {"high":80, "medium":50, "mid":50, "low":20}
+    if "trait" in df.columns:
+        tseries = df["trait"].astype(str).str.strip().str.lower().map(trait_map)
+        if "level" in df.columns:
+            lseries = df["level"].astype(str).str.strip().str.lower().map(level_map).fillna(50)
+        else:
+            lseries = pd.Series(50, index=df.index)
+        for i, col in tseries.dropna().items():
+            if col in df.columns:
+                df.loc[i, col] = lseries.loc[i]
+
+    # 5) クリーニング
+    df["text"] = df["text"].astype(str).str.strip()
+    df = df[df["text"].str.len() > 0].reset_index(drop=True)
+    return df
 
     # 4) Big5 列の正規化
     #    入力は E/A/C/N/O またはフル綴り（大小文字やスペース差異を吸収）
