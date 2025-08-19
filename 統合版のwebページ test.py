@@ -181,26 +181,83 @@ BIG5_PATH = "data/big5_chat/big5_chat_dataset.csv"  # アップロード済み�
 
 def load_big5chat():
     """
-    Big5Chat を読み込む。想定カラム:
-      - 'text'（ユーザー発話）
-      - 'Extraversion','Agreeableness','Conscientiousness','Emotional Stability','Openness'
-    ※ 列名が違う場合はここで rename してください。
+    Big5Chat を読み込む。想定カラム（ゆるく対応）:
+      - ユーザー発話: いずれか ["text","utterance","message","user_text","content","sentence"]
+      - 特性: Extraversion/Agreeableness/Conscientiousness/Emotional Stability/Openness
+             または略称 E/A/C/N/O（大文字小文字OK）
     """
-    df = pd.read_csv(BIG5_PATH)
-    # 列名の正規化（必要なら調整）
-    rename_map = {
-        'E':'Extraversion','A':'Agreeableness','C':'Conscientiousness','N':'Emotional Stability','O':'Openness',
-        'utterance':'text','message':'text'
+    # 1) CSV読込（区切りやエンコーディング差異にも軽く対応）
+    try:
+        df = pd.read_csv(BIG5_PATH)
+    except UnicodeDecodeError:
+        df = pd.read_csv(BIG5_PATH, encoding="utf-8-sig")
+    except Exception:
+        # もし ; 区切り等ならこの行を使う想定
+        df = pd.read_csv(BIG5_PATH, sep=None, engine="python")
+
+    # 2) 列名標準化（前後空白/大小を吸収）
+    df.columns = [c.strip() for c in df.columns]
+
+    # 3) 発話列の候補から1つ見つけて text にリネーム
+    text_candidates = ["text", "utterance", "message", "user_text", "content", "sentence"]
+    found_text = None
+    for c in text_candidates:
+        # 大小文字差を吸収
+        hit = [col for col in df.columns if col.lower() == c.lower()]
+        if hit:
+            found_text = hit[0]
+            break
+    if found_text is None:
+        st.error(
+            f"Big5Chat: ユーザー発話列が見つかりません。候補={text_candidates} / 実際の列={list(df.columns)}\n"
+            "CSVのヘッダ名を上記いずれかに揃えるか、この関数の text_candidates を追加してください。"
+        )
+        # ここで止める（以降の処理でエラーになるため）
+        st.stop()
+
+    if found_text != "text":
+        df = df.rename(columns={found_text: "text"})
+
+    # 4) Big5 列の正規化
+    #    入力は E/A/C/N/O またはフル綴り（大小文字やスペース差異を吸収）
+    def find_col(candidates):
+        for cand in candidates:
+            hit = [col for col in df.columns if col.lower().replace(" ", "") == cand.lower().replace(" ", "")]
+            if hit:
+                return hit[0]
+        return None
+
+    mapping = {
+        "Extraversion": find_col(["Extraversion", "E"]),
+        "Agreeableness": find_col(["Agreeableness", "A"]),
+        "Conscientiousness": find_col(["Conscientiousness", "C"]),
+        "Emotional Stability": find_col(["Emotional Stability", "Neuroticism", "N"]),  # N=Neuroticism（逆方向）
+        "Openness": find_col(["Openness", "O"]),
     }
-    for k, v in rename_map.items():
-        if k in df.columns and v not in df.columns:
-            df = df.rename(columns={k: v})
+    # 見つかった列を標準名に寄せる
+    for std, src in mapping.items():
+        if src and src != std:
+            df = df.rename(columns={src: std})
 
     needed = ['text','Extraversion','Agreeableness','Conscientiousness','Emotional Stability','Openness']
     missing = [c for c in needed if c not in df.columns]
+
+    # 5) 欠けを警告（特性がない場合でもシミュは発話だけで進めたいならここを「致命的ではない」扱いに）
     if missing:
-        st.warning(f"Big5Chat columns missing: {missing}. Please adjust load_big5chat().")
-    return df.dropna(subset=['text']).reset_index(drop=True)
+        st.warning(f"Big5Chat columns missing: {missing}. 発話だけでシミュレーションを行います。")
+
+    # 6) 型とクリーニング
+    df['text'] = df['text'].astype(str).str.strip()
+    for trait in ['Extraversion','Agreeableness','Conscientiousness','Emotional Stability','Openness']:
+        if trait in df.columns:
+            df[trait] = pd.to_numeric(df[trait], errors="coerce")
+
+    # 7) 最低限、text が空でない行に限定
+    df = df.dropna(subset=['text'])
+    df = df[df['text'].str.len() > 0].reset_index(drop=True)
+
+    return df
+
 
 def to_bins(score, step=10):
     """0–100 のスコアを step 幅（±10 など）でビン化（例: step=10 なら 0,10,20,...）"""
