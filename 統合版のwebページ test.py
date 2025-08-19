@@ -26,20 +26,54 @@ spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
 chat_sheet = spreadsheet.worksheet("Chat")
 profile_sheet = spreadsheet.worksheet("Personality")
 
+
+# --- Worksheet & Profiles キャッシュ ---
+WS_CACHE_KEY = "_ws_cache"
+PROFILES_CACHE_KEY = "_profiles_cache"
+
+def get_user_log_ws_cached(username: str, matched: bool):
+    sheet_name = f"{username}_{'Matched' if matched else 'NoMatch'}"
+    cache = st.session_state.get(WS_CACHE_KEY, {})
+    if sheet_name in cache:
+        return cache[sheet_name]
+    # 初回だけ Read の可能性あり
+    try:
+        ws = spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="7")
+        ws.append_row(["SessionID","Username","Role","Message","Timestamp","ExperimentCondition","MatchedMode"])
+    cache[sheet_name] = ws
+    st.session_state[WS_CACHE_KEY] = cache
+    return ws
+
+def safe_append_ws(ws, row, retries=5, base_delay=2.0):
+    for i in range(retries):
+        try:
+            ws.append_row(row)
+            return
+        except gspread.exceptions.APIError:
+            time.sleep(base_delay * (i + 1))
+    st.error("Failed to append after multiple retries.")
+
+def get_all_profiles_cached(ttl_sec=60):
+    now = time.time()
+    cache = st.session_state.get(PROFILES_CACHE_KEY)
+    if cache and (now - cache["ts"] < ttl_sec):
+        return cache["rows"]
+    rows = profile_sheet.get_all_records()  # 実 Read はここ一回だけ
+    st.session_state[PROFILES_CACHE_KEY] = {"ts": now, "rows": rows}
+    return rows
+
+
 def log_chat_to_sheet(user, session_id, turn_index, user_msg, ai_msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     experiment = st.session_state.get("experiment_condition", "Unknown")
-    matched = "Matched" if st.session_state.get("matched_mode", False) else "NoMatch"
-    
-    sheet_name = f"{user}_{matched}"
-    try:
-        user_sheet = spreadsheet.worksheet(sheet_name)
-    except gspread.exceptions.WorksheetNotFound:
-        user_sheet = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="7")
-        user_sheet.append_row(["SessionID", "Username", "Role", "Message", "Timestamp", "ExperimentCondition", "MatchedMode"])
-    
-    user_sheet.append_row([session_id, user, "User", user_msg, timestamp, experiment, matched])
-    user_sheet.append_row([session_id, user, "AI", ai_msg, timestamp, experiment, matched])
+    matched = st.session_state.get("matched_mode", False)
+    matched_str = "Matched" if matched else "NoMatch"
+
+    ws = get_user_log_ws_cached(user, matched)  # ← 毎回 worksheet() しない
+    safe_append_ws(ws, [session_id, user, "User", user_msg, timestamp, experiment, matched_str])
+    safe_append_ws(ws, [session_id, user, "AI",   ai_msg,  timestamp, experiment, matched_str])
 
 
 
@@ -89,10 +123,11 @@ def safe_append(sheet, row, retries=3, delay=2):
     st.error("Failed to log data after multiple retries.")
 
 def get_profile(user):
-    for row in profile_sheet.get_all_records():
-        if row["Username"] == user:
+    for row in get_all_profiles_cached():
+        if row.get("Username") == user:
             return row
     return None
+
 
 
 #Penley & Tomaka 2002, Carver & Connor-Smith 2010, Stewart 2000, Frontiers 2023
@@ -222,37 +257,29 @@ def make_user_inputs_from_group(gdf, min_count=60, seed=0):
         i += 1
     return out
 
-def run_simulation_for_user(username, profile_dict, user_inputs, flip_after=30):
-    """
-    1ユーザーについて 60 入力程度を投入:
-      - 前半: Non-match（flip ロジック適用）
-      - 後半: Match（通常）
-    既存の call_api / build プロンプトに合わせて API 叩き、Google Sheet にもログする。
-    """
-    # 会話履歴はここでは短めに（直近 4ターン）だけ参照
+def run_simulation_for_user_slow(username, profile_dict, user_inputs, flip_after=30, delay_sec=2.0):
     chat_history = []
-    turn_index = 0
-    for ux in user_inputs:
-        turn_index += 1
-        # match 切替
-        match = (turn_index > flip_after)
+    session_id = st.session_state.get("session_id", str(uuid.uuid4()))
+    progress = st.empty()
 
-        # Chat ページと同じトーン構築
+    for turn_index, ux in enumerate(user_inputs, start=1):
+        match = (turn_index > flip_after)
+        st.session_state['matched_mode'] = match
+
+        # トーン生成（既存ロジック流用）
         tone_data = determine_tone(profile_dict, match=match)
         tone_instruction = (
             f"Respond in a {tone_data['tone']}, {tone_data['empathy']} way. "
             f"Keep tone {tone_data['emotional']} and include {tone_data['creativity']} ideas. "
             f"{tone_data['special_instruction']}"
         )
-
         profile_summary = ", ".join([
-            f"Extraversion={profile_dict.get('Extraversion', 'N/A')}",
-            f"Agreeableness={profile_dict.get('Agreeableness', 'N/A')}",
-            f"Conscientiousness={profile_dict.get('Conscientiousness', 'N/A')}",
-            f"Emotional Stability={profile_dict.get('Emotional Stability', 'N/A')}",
-            f"Openness={profile_dict.get('Openness', 'N/A')}"
+            f"Extraversion={profile_dict.get('Extraversion','N/A')}",
+            f"Agreeableness={profile_dict.get('Agreeableness','N/A')}",
+            f"Conscientiousness={profile_dict.get('Conscientiousness','N/A')}",
+            f"Emotional Stability={profile_dict.get('Emotional Stability','N/A')}",
+            f"Openness={profile_dict.get('Openness','N/A')}",
         ])
-
         context = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history[-4:]])
 
         prompt = f"""
@@ -272,68 +299,22 @@ Assistant:
 """.strip()
 
         crisis_msg = handle_crisis(ux)
-        if crisis_msg:
-            ai_reply = crisis_msg
-        else:
-            ai_reply = call_api(prompt) or "[Simulation] No response."
+        ai_reply = crisis_msg if crisis_msg else (call_api(prompt) or "[Simulation] No response.")
 
-        # 履歴更新とログ保存
-        chat_history.append({"role": "User", "content": ux})
-        chat_history.append({"role": "AI", "content": ai_reply})
+        chat_history.extend([{"role":"User","content":ux},{"role":"AI","content":ai_reply}])
 
-        # ⚠️ シミュレーションでもログ形式は実ユーザーと同じ
-        # 実装の log_chat_to_sheet は st.session_state の matched_mode を参照しているので一時的に設定
-        st.session_state['matched_mode'] = match
+        # 書き込み（キャッシュ利用で Read しない）
         log_chat_to_sheet(
             user=username,
-            session_id=st.session_state.get("session_id", str(uuid.uuid4())),
+            session_id=session_id,
             turn_index=turn_index,
             user_msg=ux,
             ai_msg=ai_reply
         )
 
-def simulate_many_users(n_users=3, step=10, min_turns=60, seed=42):
-    """
-    Big5Chat の実データから、±step で近いスコアをまとめた擬似ユーザーを複数作る。
-      1) ランダムな中心スコアを n_users 個サンプリング
-      2) その中心スコア ±step の範囲に入る発話群から少なくとも min_turns を集める
-      3) 30ターン Non-match → 以降 Match で応答生成 + ログ保存
-    """
-    df = load_big5chat()
-    if df.empty:
-        st.error("Big5Chat could not be loaded or has no rows.")
-        return
+        progress.text(f"{username}: {turn_index}/{len(user_inputs)} processed...")
+        time.sleep(delay_sec)  # ← ここで確実にペースを落とす
 
-    rng = random.Random(seed)
-    centers = []
-    # Big5Chat の各スコアを step でビン化した候補からランダム選択
-    for _ in range(n_users):
-        ridx = rng.randrange(0, len(df))
-        row = df.iloc[ridx]
-        center = {
-            "Extraversion": to_bins(row['Extraversion'], step=step),
-            "Agreeableness": to_bins(row['Agreeableness'], step=step),
-            "Conscientiousness": to_bins(row['Conscientiousness'], step=step),
-            "Emotional Stability": to_bins(row['Emotional Stability'], step=step),
-            "Openness": to_bins(row['Openness'], step=step),
-        }
-        centers.append(center)
-
-    for i, center in enumerate(centers, start=1):
-        gdf = group_by_trait_window(df, center=center, window=step)
-        if gdf.empty:
-            st.warning(f"[SimUser{i}] No samples in ±{step} for center={center}. Skipped.")
-            continue
-
-        inputs = make_user_inputs_from_group(gdf, min_count=min_turns, seed=seed+i)
-        profile_dict = build_profile_from_center(center)
-        username = f"Simulated_user{i}"
-        st.info(f"Running simulation for {username} with center={center} using {len(inputs)} inputs...")
-        run_simulation_for_user(username, profile_dict, inputs, flip_after=30)
-
-    st.success("Simulation finished. Check Google Sheets for logs.")
-
-# ==== ここまで シミュレーション関数 ==== #
 
 
 
@@ -384,12 +365,12 @@ st.session_state.user_name = user_name
 
 
 # すでに登録されているユーザーか確認
-existing_users = [row["Username"] for row in profile_sheet.get_all_records()]
+_all_profiles = get_all_profiles_cached()
+existing_users = [row.get("Username") for row in _all_profiles]
 if st.session_state.user_name in existing_users:
-    user_row = next(row for row in profile_sheet.get_all_records() if row["Username"] == st.session_state.user_name)
-    st.session_state.experiment_condition = user_row["ExperimentCondition"]
+    user_row = next(row for row in _all_profiles if row.get("Username") == st.session_state.user_name)
+    st.session_state.experiment_condition = user_row.get("ExperimentCondition", "Fixed Empathy")
 else:
-    # 新規ユーザー：偶数/奇数で割り当て
     st.session_state.experiment_condition = "Fixed Empathy" if len(existing_users) % 2 == 0 else "Personalized Empathy"
 
 
@@ -558,6 +539,8 @@ if page == "Chat Session":
     user_input = st.chat_input("Your message...")
     if user_input:
         st.session_state.turn_index += 1
+        st.session_state['matched_mode'] = (st.session_state.turn_index >= 30)  # ← 追加
+
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
 
 
@@ -585,24 +568,23 @@ if page == "Chat Session":
                 f"Openness={profile.get('Openness', 'N/A')}"
             ])
 
-
             prompt = f"""
-You are a warm, supportive mental health assistant.
-Reflect this personality style: {tone_instruction}.
-Write a natural, conversational response in 2–3 sentences:
-- Acknowledge the user's concern using their own words.
-- Ask ONE relevant question to keep the conversation going.
-Avoid sounding like a list. Make it flow like a real chat.
--Suggest ONE practical coping tip based on their personality ({profile_summary}) and briefly explain why it helps.
-Avoid phrases like "I understand" or "That sounds tough".
-Keep it empathetic, practical, and conversational.
-Conversation so far:
-{context}
-User: {user_input}
-Assistant:
-"""
+            You are a warm, supportive mental health assistant.
+            Reflect this personality style: {tone_instruction}.
+            Write a natural, conversational response in 2–3 sentences:
+            - Acknowledge the user's concern using their own words.
+            - Ask ONE relevant question to keep the conversation going.
+            Avoid sounding like a list. Make it flow like a real chat.
+            -Suggest ONE practical coping tip based on their personality ({profile_summary}) and briefly explain why it helps.
+            Avoid phrases like "I understand" or "That sounds tough".
+            Keep it empathetic, practical, and conversational.
+            Conversation so far:
+            {context}
+            User: {user_input}
+            Assistant:
+            """.strip()
 
-        ai_reply = call_api(prompt) or "The system could not generate a response. Try again. If that doesn't work conatact Ryosuke Komatsu"
+            ai_reply = call_api(prompt) or "The system could not generate a response. Try again. If that doesn't work contact Ryosuke Komatsu"
 
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
@@ -642,17 +624,40 @@ if user_name.lower() == "admin":
     st.sidebar.write(f"Your Condition: {st.session_state['experiment_condition']}")
     st.sidebar.write(f"Match Mode: {st.session_state.get('matched_mode', False)}")
     
-    # 追加: 全ユーザー一覧表示
-    st.sidebar.subheader("All Users")
-    all_profiles = profile_sheet.get_all_records()  # ←これでOK
-    for p in all_profiles:
-        st.sidebar.write(f"{p['Username']} | Condition: {p.get('ExperimentCondition', 'N/A')} | Match: {p.get('MatchMode', 'N/A')}")
 
-    # （既存の Admin Debug Panel の最後に 追記）
-    st.sidebar.subheader("Simulation (Big5Chat)")
-    sim_users = st.sidebar.number_input("Number of simulated users", min_value=1, max_value=50, value=3, step=1)
-    sim_step  = st.sidebar.slider("Trait match window (±)", min_value=5, max_value=20, value=10, step=1)
-    sim_turns = st.sidebar.slider("Turns per user", min_value=30, max_value=120, value=60, step=10)
-    if st.sidebar.button("Run Big5Chat Simulation"):
-        with st.spinner("Simulating conversations from Big5Chat..."):
-            simulate_many_users(n_users=int(sim_users), step=int(sim_step), min_turns=int(sim_turns))
+    # 追加: 全ユーザー一覧表示（キャッシュ使用）
+    st.sidebar.subheader("All Users")
+    for p in get_all_profiles_cached():
+        st.sidebar.write(f"{p.get('Username')} | Condition: {p.get('ExperimentCondition', 'N/A')} | Match: {p.get('MatchMode', 'N/A')}")
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Slow Simulation (rate-limited)")
+    sim_users_slow = st.sidebar.number_input("Users (slow)", min_value=1, max_value=50, value=1, step=1)
+    sim_step_slow  = st.sidebar.slider("Trait window (±, slow)", min_value=5, max_value=20, value=10, step=1)
+    sim_turns_slow = st.sidebar.slider("Turns/user (slow)", min_value=10, max_value=120, value=60, step=10)
+    sim_delay      = st.sidebar.slider("Delay between turns (sec)", min_value=0.5, max_value=10.0, value=2.0, step=0.5)
+
+    if st.sidebar.button("Run Big5Chat Simulation (Slow)"):
+        with st.spinner("Simulating slowly to respect API quotas..."):
+            df = load_big5chat()
+            rng = random.Random(42)
+            for i in range(int(sim_users_slow)):
+                # ランダム中心 → ±stepで抽出
+                row = df.iloc[rng.randrange(0, len(df))]
+                center = {
+                    "Extraversion": to_bins(row['Extraversion'], step=sim_step_slow),
+                    "Agreeableness": to_bins(row['Agreeableness'], step=sim_step_slow),
+                    "Conscientiousness": to_bins(row['Conscientiousness'], step=sim_step_slow),
+                    "Emotional Stability": to_bins(row['Emotional Stability'], step=sim_step_slow),
+                    "Openness": to_bins(row['Openness'], step=sim_step_slow),
+                }
+                gdf = group_by_trait_window(df, center, window=sim_step_slow)
+                if gdf.empty:
+                    st.warning(f"[Slow SimUser{i+1}] No samples in ±{sim_step_slow} for center={center}. Skipped.")
+                    continue
+                inputs = make_user_inputs_from_group(gdf, min_count=int(sim_turns_slow), seed=100+i)
+                profile_dict = build_profile_from_center(center)
+                username = f"Simulated_user_slow{i+1}"
+                st.info(f"Slow run for {username}, center={center}, inputs={len(inputs)}")
+                run_simulation_for_user_slow(username, profile_dict, inputs, flip_after=30, delay_sec=float(sim_delay))
+        st.success("Slow simulation finished.")
