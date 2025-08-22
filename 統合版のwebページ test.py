@@ -32,19 +32,38 @@ WS_CACHE_KEY = "_ws_cache"
 PROFILES_CACHE_KEY = "_profiles_cache"
 
 def get_user_log_ws_cached(username: str, matched: bool):
-    sheet_name = f"{username}_{'Matched' if matched else 'NoMatch'}"
+    """
+    Fixed → LOGS_FIXED に集約
+    Personalized → NoMatch/Matched を別タブ（LOGS_PERS_NOMATCH / LOGS_PERS_MATCHED）
+    """
+    exp_cond = st.session_state.get("experiment_condition", "Unknown")
+    if exp_cond == "Fixed Empathy":
+        sheet_name = "LOGS_FIXED"
+    else:
+        sheet_name = "LOGS_PERS_MATCHED" if matched else "LOGS_PERS_NOMATCH"
+
     cache = st.session_state.get(WS_CACHE_KEY, {})
     if sheet_name in cache:
         return cache[sheet_name]
-    # 初回だけ Read の可能性あり
+
     try:
         ws = spreadsheet.worksheet(sheet_name)
     except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="7")
-        ws.append_row(["SessionID","Username","Role","Message","Timestamp","ExperimentCondition","MatchedMode"])
+        ws = spreadsheet.add_worksheet(title=sheet_name, rows="200000", cols="24")
+        # ヘッダー：あとでユーザー単位で復元しやすい構成
+        ws.append_row([
+            "SessionID","Username","Role","Message","Timestamp",
+            "ExperimentCondition","MatchedMode","Turn","Phase",
+            "GroupID","UserIndex","GroupUser",
+            # One-hot（Group 1〜10）
+            "Group 1","Group 2","Group 3","Group 4","Group 5",
+            "Group 6","Group 7","Group 8","Group 9","Group 10"
+        ])
     cache[sheet_name] = ws
     st.session_state[WS_CACHE_KEY] = cache
     return ws
+
+
 
 def safe_append_ws(ws, row, retries=5, base_delay=2.0):
     for i in range(retries):
@@ -64,16 +83,54 @@ def get_all_profiles_cached(ttl_sec=60):
     st.session_state[PROFILES_CACHE_KEY] = {"ts": now, "rows": rows}
     return rows
 
+# ← ここは get_all_profiles_cached() の直後に入れる
+def invalidate_profiles_cache():
+    if PROFILES_CACHE_KEY in st.session_state:
+        del st.session_state[PROFILES_CACHE_KEY]
 
-def log_chat_to_sheet(user, session_id, turn_index, user_msg, ai_msg):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    experiment = st.session_state.get("experiment_condition", "Unknown")
-    matched = st.session_state.get("matched_mode", False)
-    matched_str = "Matched" if matched else "NoMatch"
+def ensure_personality_row(username: str, session_id: str, experiment_condition: str, profile_dict: dict, responses_json: str = "{}"):
+    """
+    Personalityに同名ユーザーが無ければ1回だけ登録する。
+    """
+    rows = get_all_profiles_cached()
+    if any(r.get("Username") == username for r in rows):
+        return  # 既に登録済み
 
-    ws = get_user_log_ws_cached(user, matched)  # ← 毎回 worksheet() しない
-    safe_append_ws(ws, [session_id, user, "User", user_msg, timestamp, experiment, matched_str])
-    safe_append_ws(ws, [session_id, user, "AI",   ai_msg,  timestamp, experiment, matched_str])
+    row = [
+        username,
+        session_id,
+        experiment_condition,
+        int(profile_dict.get("Extraversion", 50)),
+        int(profile_dict.get("Agreeableness", 50)),
+        int(profile_dict.get("Conscientiousness", 50)),
+        int(profile_dict.get("Emotional Stability", 50)),
+        int(profile_dict.get("Openness", 50)),
+        responses_json,
+    ]
+    safe_append(profile_sheet, row)
+    invalidate_profiles_cache()
+
+
+def log_chat_to_sheet(ws, session_id, username, user_msg, ai_msg,
+                      timestamp, experiment, matched_bool,
+                      turn, phase, group_id, user_index):
+    matched_str = "Matched" if matched_bool else "NoMatch"
+    group_user = f"Group {group_id} Simulated User {user_index}"
+    # One-hot 10列
+    onehot = [1 if (i+1) == int(group_id) else 0 for i in range(10)]
+
+    # User行
+    safe_append_ws(ws, [
+        session_id, username, "User", user_msg, timestamp,
+        experiment, matched_str, turn, phase,
+        group_id, user_index, group_user, *onehot
+    ])
+    # AI行
+    safe_append_ws(ws, [
+        session_id, username, "AI", ai_msg, timestamp,
+        experiment, matched_str, turn, phase,
+        group_id, user_index, group_user, *onehot
+    ])
 
 
 
@@ -96,21 +153,6 @@ if "turn_index" not in st.session_state:
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
-# 初回アンケートのお願い（チャット開始前）
-if not st.session_state.survey_prompts_shown["initial"]:
-    with st.form("initial_survey_form"):
-        st.info("Before starting the chat, would you be willing to complete a short survey?")
-        answer = st.radio("Survey Consent", ["Yes", "No"])
-        submit = st.form_submit_button("Submit")
-        if submit:
-            st.session_state.survey_prompts_shown["initial"] = True
-            if answer == "Yes":
-                st.success("Thank you! Please fill out the form: [Survey Link](https://example.com/survey_initial)")
-            else:
-                st.info("No problem, you can continue to the chat.")
-            st.stop()  # ユーザーが回答するまで進ませない
-
 
 # === Google Sheets 安全書き込み ===
 def safe_append(sheet, row, retries=3, delay=2):
@@ -234,45 +276,47 @@ def load_big5chat():
     df = df[df["text"].str.len() > 0].reset_index(drop=True)
     return df
 
-    # 4) Big5 列の正規化
-    #    入力は E/A/C/N/O またはフル綴り（大小文字やスペース差異を吸収）
-    def find_col(candidates):
-        for cand in candidates:
-            hit = [col for col in df.columns if col.lower().replace(" ", "") == cand.lower().replace(" ", "")]
-            if hit:
-                return hit[0]
-        return None
+def build_disjoint_batches(df: pd.DataFrame, batch_size: int = 60, seed: int = 42):
+    """
+    Big5 の完全一致クラスタごとに行をシャッフルし、60件ずつ“重複ゼロ”のバッチに分割。
+    返り値: [{'group_id': 1..G, 'user_index': 1..U, 'texts': [...60件...], 'center': {...Big5}}] のリスト
+    """
+    traits = ["Extraversion","Agreeableness","Conscientiousness","Emotional Stability","Openness"]
+    # 特性の整数化（安全側）
+    for col in traits:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(50).astype(int)
 
-    mapping = {
-        "Extraversion": find_col(["Extraversion", "E"]),
-        "Agreeableness": find_col(["Agreeableness", "A"]),
-        "Conscientiousness": find_col(["Conscientiousness", "C"]),
-        "Emotional Stability": find_col(["Emotional Stability", "Neuroticism", "N"]),  # N=Neuroticism（逆方向）
-        "Openness": find_col(["Openness", "O"]),
-    }
-    # 見つかった列を標準名に寄せる
-    for std, src in mapping.items():
-        if src and src != std:
-            df = df.rename(columns={src: std})
+    # 完全一致クラスタのインデックス辞書（中心タプル -> 行インデックス配列）
+    centers_df = df[traits].astype(int)
+    groups = centers_df.groupby(traits).indices   # dict: { (E,A,C,ES,O): np.ndarray([...]) }
 
-    needed = ['text','Extraversion','Agreeableness','Conscientiousness','Emotional Stability','Openness']
-    missing = [c for c in needed if c not in df.columns]
+    # 安定順序で group_id を振る
+    sorted_centers = sorted(groups.keys())
+    rng = random.Random(seed)
 
-    # 5) 欠けを警告（特性がない場合でもシミュは発話だけで進めたいならここを「致命的ではない」扱いに）
-    if missing:
-        st.warning(f"Big5Chat columns missing: {missing}. 発話だけでシミュレーションを行います。")
+    batches = []
+    for gid, center in enumerate(sorted_centers, start=1):
+        idxs = list(groups[center])
+        rng.shuffle(idxs)  # シャッフル固定シード
 
-    # 6) 型とクリーニング
-    df['text'] = df['text'].astype(str).str.strip()
-    for trait in ['Extraversion','Agreeableness','Conscientiousness','Emotional Stability','Openness']:
-        if trait in df.columns:
-            df[trait] = pd.to_numeric(df[trait], errors="coerce")
+        # 60件ずつに切る（余りは捨てる）
+        full_len = len(idxs) - (len(idxs) % batch_size)
+        for uidx, start in enumerate(range(0, full_len, batch_size), start=1):
+            batch_indices = idxs[start:start+batch_size]
+            texts = df.loc[batch_indices, "text"].astype(str).tolist()
+            center_dict = {
+                "Extraversion": center[0], "Agreeableness": center[1],
+                "Conscientiousness": center[2], "Emotional Stability": center[3],
+                "Openness": center[4],
+            }
+            batches.append({
+                "group_id": gid,
+                "user_index": uidx,
+                "texts": texts,
+                "center": center_dict
+            })
 
-    # 7) 最低限、text が空でない行に限定
-    df = df.dropna(subset=['text'])
-    df = df[df['text'].str.len() > 0].reset_index(drop=True)
-
-    return df
+    return batches
 
 
 def to_bins(score, step=10):
@@ -330,22 +374,29 @@ def make_user_inputs_from_group(gdf, min_count=60, seed=0):
         i += 1
     return out
 
-def run_simulation_for_user_slow(username, profile_dict, user_inputs, flip_after=30, delay_sec=2.0):
+def run_simulation_for_user_slow(username, profile_dict, user_inputs, session_id, flip_after=30, delay_sec=2.0):
     chat_history = []
-    session_id = st.session_state.get("session_id", str(uuid.uuid4()))
     progress = st.empty()
 
     for turn_index, ux in enumerate(user_inputs, start=1):
-        match = (turn_index > flip_after)
-        st.session_state['matched_mode'] = match
+        match = (turn_index >= flip_after)
+        exp_cond = st.session_state.get("experiment_condition", "Personalized Empathy")
 
-        # トーン生成（既存ロジック流用）
-        tone_data = determine_tone(profile_dict, match=match)
-        tone_instruction = (
-            f"Respond in a {tone_data['tone']}, {tone_data['empathy']} way. "
-            f"Keep tone {tone_data['emotional']} and include {tone_data['creativity']} ideas. "
-            f"{tone_data['special_instruction']}"
-        )
+        # ログ用フラグと Phase（Fixedは常にNoMatch扱い／Phaseは空）
+        matched_for_log = (match if exp_cond != "Fixed Empathy" else False)
+        phase = (("Matched" if match else "NoMatch") if exp_cond != "Fixed Empathy" else "")
+
+        # トーン分岐
+        if exp_cond == "Fixed Empathy":
+            tone_instruction = "Respond in a calm, supportive tone, like a counselor."
+        else:
+            tone_data = determine_tone(profile_dict, match=match)
+            tone_instruction = (
+                f"Respond in a {tone_data['tone']}, {tone_data['empathy']} way. "
+                f"Keep tone {tone_data['emotional']} and include {tone_data['creativity']} ideas. "
+                f"{tone_data['special_instruction']}"
+            )
+
         profile_summary = ", ".join([
             f"Extraversion={profile_dict.get('Extraversion','N/A')}",
             f"Agreeableness={profile_dict.get('Agreeableness','N/A')}",
@@ -354,7 +405,6 @@ def run_simulation_for_user_slow(username, profile_dict, user_inputs, flip_after
             f"Openness={profile_dict.get('Openness','N/A')}",
         ])
         context = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history[-4:]])
-
         prompt = f"""
 You are a warm, supportive mental health assistant.
 Reflect this personality style: {tone_instruction}.
@@ -376,18 +426,34 @@ Assistant:
 
         chat_history.extend([{"role":"User","content":ux},{"role":"AI","content":ai_reply}])
 
-        # 書き込み（キャッシュ利用で Read しない）
+        # --- ログ書き込み（正しい順序/引数で1回だけ） ---
+        ws = get_user_log_ws_cached(username, matched_for_log)
+        ts_iso = datetime.utcnow().isoformat()
+
+        # "Group {k} Simulated User {n}" から抽出
+        try:
+            parts = username.split()
+            group_id = int(parts[1]); user_index = int(parts[-1])
+        except Exception:
+            group_id = 0; user_index = 0
+
         log_chat_to_sheet(
-            user=username,
-            session_id=session_id,
-            turn_index=turn_index,
-            user_msg=ux,
-            ai_msg=ai_reply
+            ws,                 # 1) ws
+            session_id,         # 2) SessionID（呼び出し元で生成）
+            username,           # 3) Username
+            ux,                 # 4) User message
+            ai_reply,           # 5) AI message
+            ts_iso,             # 6) Timestamp
+            exp_cond,           # 7) ExperimentCondition
+            matched_for_log,    # 8) MatchedMode(bool)
+            turn_index,         # 9) Turn (1..60)
+            phase,              # 10) Phase
+            group_id,           # 11) GroupID
+            user_index          # 12) UserIndex
         )
 
         progress.text(f"{username}: {turn_index}/{len(user_inputs)} processed...")
-        time.sleep(delay_sec)  # ← ここで確実にペースを落とす
-
+        time.sleep(delay_sec)
 
 
 
@@ -603,6 +669,20 @@ if page == "Personality Test":
 
 # === Chatページ ===
 if page == "Chat Session":
+    # 初回アンケート（adminはスキップ）
+    if user_name.lower() != "admin" and not st.session_state.survey_prompts_shown["initial"]:
+        with st.form("initial_survey_form"):
+            st.info("Before starting the chat, would you be willing to complete a short survey?")
+            answer = st.radio("Survey Consent", ["Yes", "No"])
+            submit = st.form_submit_button("Submit")
+            if submit:
+                st.session_state.survey_prompts_shown["initial"] = True
+                if answer == "Yes":
+                    st.success("Thank you! Please fill out the form: [Survey Link](https://example.com/survey_initial)")
+                else:
+                    st.info("No problem, you can continue to the chat.")
+                st.stop()
+
     st.title(f"Chatbot - {user_name}")
     profile = get_profile(user_name)
     if not profile:
@@ -612,7 +692,8 @@ if page == "Chat Session":
     user_input = st.chat_input("Your message...")
     if user_input:
         st.session_state.turn_index += 1
-        st.session_state['matched_mode'] = (st.session_state.turn_index >= 30)  # ← 追加
+        is_fixed = (st.session_state.get("experiment_condition") == "Fixed Empathy")
+        st.session_state['matched_mode'] = (False if is_fixed else (st.session_state.turn_index >= 30))
 
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history[-4:]])
 
@@ -662,13 +743,32 @@ if page == "Chat Session":
         st.session_state.chat_history.append({"role": "User", "content": user_input})
         st.session_state.chat_history.append({"role": "AI", "content": ai_reply})
 
+        # --- ここからログ保存（Chat画面用） ---
+        exp_cond = st.session_state.get("experiment_condition", "Fixed Empathy")
+        matched_for_log = st.session_state.get("matched_mode", False)
+        phase = (("Matched" if matched_for_log else "NoMatch") if exp_cond != "Fixed Empathy" else "")
+
+        ws = get_user_log_ws_cached(user_name, matched_for_log)
+        ts_iso = datetime.utcnow().isoformat()
+
+        group_id, user_index = 0, 0  # 通常ユーザーは0埋め
+
         log_chat_to_sheet(
-            user=user_name,
-            session_id=st.session_state.session_id,
-            turn_index=st.session_state.turn_index,
-            user_msg=user_input,
-            ai_msg=ai_reply
+            ws,
+            st.session_state.session_id,
+            user_name,
+            user_input,
+            ai_reply,
+            ts_iso,
+            exp_cond,
+            matched_for_log,
+            st.session_state.turn_index,
+            phase,
+            group_id,
+            user_index
         )
+
+
 
         # アンケートリンクを一元管理
         survey_links = {
@@ -691,12 +791,38 @@ if page == "Chat Session":
     for msg in st.session_state.chat_history:
         st.chat_message(msg["role"].lower()).write(msg["content"])
 
+#「続きからシミュレーション再開」できるように進捗を永続化
+def get_meta_ws():
+    try:
+        return spreadsheet.worksheet("SIM_META")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title="SIM_META", rows="100", cols="3")
+        ws.append_row(["Key","Value","UpdatedAt"])
+        return ws
+
+def read_sim_state(key="DISJOINT_PTR"):
+    ws = get_meta_ws()
+    try:
+        cells = ws.findall(key)
+        if not cells:
+            return None
+        row = ws.row_values(cells[-1].row)
+        return int(row[1])
+    except Exception:
+        return None
+
+def write_sim_state(key, value):
+    ws = get_meta_ws()
+    ts = datetime.utcnow().isoformat() 
+    safe_append_ws(ws, [key, str(value), ts])
+
+
+
 # === Admin Debug Panel ===
 if user_name.lower() == "admin":
     st.sidebar.markdown("### Debug Panel")
     st.sidebar.write(f"Your Condition: {st.session_state['experiment_condition']}")
     st.sidebar.write(f"Match Mode: {st.session_state.get('matched_mode', False)}")
-    
 
     # 追加: 全ユーザー一覧表示（キャッシュ使用）
     st.sidebar.subheader("All Users")
@@ -709,28 +835,103 @@ if user_name.lower() == "admin":
     sim_step_slow  = st.sidebar.slider("Trait window (±, slow)", min_value=5, max_value=20, value=10, step=1)
     sim_turns_slow = st.sidebar.slider("Turns/user (slow)", min_value=10, max_value=120, value=60, step=10)
     sim_delay      = st.sidebar.slider("Delay between turns (sec)", min_value=0.5, max_value=10.0, value=2.0, step=0.5)
+    use_disjoint_batches = st.sidebar.checkbox("Use disjoint 60-text batches (no overlap)", value=True)
 
     if st.sidebar.button("Run Big5Chat Simulation (Slow)"):
         with st.spinner("Simulating slowly to respect API quotas..."):
             df = load_big5chat()
             rng = random.Random(42)
-            for i in range(int(sim_users_slow)):
-                # ランダム中心 → ±stepで抽出
-                row = df.iloc[rng.randrange(0, len(df))]
-                center = {
-                    "Extraversion": to_bins(row['Extraversion'], step=sim_step_slow),
-                    "Agreeableness": to_bins(row['Agreeableness'], step=sim_step_slow),
-                    "Conscientiousness": to_bins(row['Conscientiousness'], step=sim_step_slow),
-                    "Emotional Stability": to_bins(row['Emotional Stability'], step=sim_step_slow),
-                    "Openness": to_bins(row['Openness'], step=sim_step_slow),
-                }
-                gdf = group_by_trait_window(df, center, window=sim_step_slow)
-                if gdf.empty:
-                    st.warning(f"[Slow SimUser{i+1}] No samples in ±{sim_step_slow} for center={center}. Skipped.")
-                    continue
-                inputs = make_user_inputs_from_group(gdf, min_count=int(sim_turns_slow), seed=100+i)
-                profile_dict = build_profile_from_center(center)
-                username = f"Simulated_user_slow{i+1}"
-                st.info(f"Slow run for {username}, center={center}, inputs={len(inputs)}")
-                run_simulation_for_user_slow(username, profile_dict, inputs, flip_after=30, delay_sec=float(sim_delay))
+
+            if use_disjoint_batches:
+                # 1) 60件バッチを一度だけ構築 & 進捗ポインタの読み戻し
+                if "DISJOINT_BATCHES" not in st.session_state:
+                    st.session_state.DISJOINT_BATCHES = build_disjoint_batches(df, batch_size=int(sim_turns_slow), seed=42)
+
+                ptr_saved = read_sim_state("DISJOINT_PTR")
+                ptr = ptr_saved if ptr_saved is not None else st.session_state.get("DISJOINT_PTR", 0)
+
+                batches = st.session_state.DISJOINT_BATCHES
+                take = int(sim_users_slow)
+                end_ptr = min(ptr + take, len(batches))
+
+                # 2) 交互割当 → 登録 → 実行（毎ユーザー固有の SessionID）
+                for bidx in range(ptr, end_ptr):
+                    b = batches[bidx]
+
+                    # 交互割当（既存人数の偶奇）
+                    _all = get_all_profiles_cached()
+                    experiment_condition = "Fixed Empathy" if (len(_all) % 2 == 0) else "Personalized Empathy"
+                    st.session_state.experiment_condition = experiment_condition
+
+                    username = f"Group {b['group_id']} Simulated User {b['user_index']}"
+                    session_id = str(uuid.uuid4())  # ← 毎ユーザー固有
+
+                    profile_dict = build_profile_from_center(b["center"])
+                    ensure_personality_row(
+                        username=username,
+                        session_id=session_id,
+                        experiment_condition=experiment_condition,
+                        profile_dict=profile_dict,
+                        responses_json=json.dumps({"source":"simulation_disjoint","group":b["group_id"],"user_index":b["user_index"]})
+                    )
+
+                    st.info(f"Slow run for {username} | center={b['center']} | turns={len(b['texts'])} | condition={experiment_condition}")
+                    run_simulation_for_user_slow(
+                        username=username,
+                        profile_dict=profile_dict,
+                        user_inputs=b["texts"],      # ← 60件の重複ゼロセット
+                        session_id=session_id,       # ← 必ず渡す
+                        flip_after=30,               # ← Personalizedのみ効く
+                        delay_sec=float(sim_delay)
+                    )
+
+                # 3) ポインタ更新（1回だけ）
+                st.session_state.DISJOINT_PTR = end_ptr
+                write_sim_state("DISJOINT_PTR", end_ptr)
+
+            else:
+                # 旧来の「±windowから60件サンプル」モード
+                for i in range(int(sim_users_slow)):
+                    _all_profiles = get_all_profiles_cached()
+                    existing_users = [row.get("Username") for row in _all_profiles]
+                    experiment_condition = "Fixed Empathy" if (len(existing_users) % 2 == 0) else "Personalized Empathy"
+                    st.session_state.experiment_condition = experiment_condition
+
+                    username = f"SimUser_{len(existing_users)+1}_{'Fixed' if experiment_condition=='Fixed Empathy' else 'Personalized'}"
+                    session_id = str(uuid.uuid4())  # ← 毎ユーザー固有
+
+                    row = df.iloc[rng.randrange(0, len(df))]
+                    center = {
+                        "Extraversion": to_bins(row['Extraversion'], step=sim_step_slow),
+                        "Agreeableness": to_bins(row['Agreeableness'], step=sim_step_slow),
+                        "Conscientiousness": to_bins(row['Conscientiousness'], step=sim_step_slow),
+                        "Emotional Stability": to_bins(row['Emotional Stability'], step=sim_step_slow),
+                        "Openness": to_bins(row['Openness'], step=sim_step_slow),
+                    }
+                    gdf = group_by_trait_window(df, center, window=sim_step_slow)
+                    if gdf.empty:
+                        st.warning(f"[Slow {username}] No samples in ±{sim_step_slow} for center={center}. Skipped.")
+                        continue
+
+                    inputs = make_user_inputs_from_group(gdf, min_count=int(sim_turns_slow), seed=100+i)
+                    profile_dict = build_profile_from_center(center)
+
+                    ensure_personality_row(
+                        username=username,
+                        session_id=session_id,
+                        experiment_condition=experiment_condition,
+                        profile_dict=profile_dict,
+                        responses_json='{"source":"simulation"}'
+                    )
+
+                    st.info(f"Slow run for {username}, center={center}, inputs={len(inputs)}, condition={experiment_condition}")
+                    run_simulation_for_user_slow(
+                        username=username,
+                        profile_dict=profile_dict,
+                        user_inputs=inputs,
+                        session_id=session_id,       # ← 必ず渡す
+                        flip_after=30,
+                        delay_sec=float(sim_delay)
+                    )
+
         st.success("Slow simulation finished.")
