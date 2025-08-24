@@ -23,7 +23,6 @@ credentials = ServiceAccountCredentials.from_json_keyfile_name(tmp_path, scope)
 client = gspread.authorize(credentials)
 
 spreadsheet = client.open_by_key("1XpB4gzlkOS72uJMADmSIuvqECM5Ud8M-KwwJbXSxJxM")
-chat_sheet = spreadsheet.worksheet("Chat")
 profile_sheet = spreadsheet.worksheet("Personality")
 
 
@@ -33,8 +32,8 @@ PROFILES_CACHE_KEY = "_profiles_cache"
 
 def get_user_log_ws_cached(username: str, matched: bool):
     """
-    Fixed → LOGS_FIXED に集約
-    Personalized → NoMatch/Matched を別タブ（LOGS_PERS_NOMATCH / LOGS_PERS_MATCHED）
+    Fixed → LOGS_FIXED
+    Personalized → LOGS_PERS_NOMATCH / LOGS_PERS_MATCHED
     """
     exp_cond = st.session_state.get("experiment_condition", "Unknown")
     if exp_cond == "Fixed Empathy":
@@ -46,22 +45,36 @@ def get_user_log_ws_cached(username: str, matched: bool):
     if sheet_name in cache:
         return cache[sheet_name]
 
+    header = [
+        "SessionID","Username","Role","Message","Timestamp",
+        "ExperimentCondition","MatchedMode","Turn","Phase",
+        "GroupID","UserIndex","GroupUser",
+        # One-hot（必要なら残す／セル節約したいなら削除OK）
+        "Group 1","Group 2","Group 3","Group 4","Group 5",
+        "Group 6","Group 7","Group 8","Group 9","Group 10"
+    ]
+
     try:
         ws = spreadsheet.worksheet(sheet_name)
     except gspread.exceptions.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=sheet_name, rows="200000", cols="24")
-        # ヘッダー：あとでユーザー単位で復元しやすい構成
-        ws.append_row([
-            "SessionID","Username","Role","Message","Timestamp",
-            "ExperimentCondition","MatchedMode","Turn","Phase",
-            "GroupID","UserIndex","GroupUser",
-            # One-hot（Group 1〜10）
-            "Group 1","Group 2","Group 3","Group 4","Group 5",
-            "Group 6","Group 7","Group 8","Group 9","Group 10"
-        ])
+        try:
+            ws = spreadsheet.add_worksheet(
+                title=sheet_name,
+                rows="5000",                       # 小さく開始（append_rowで自動拡張）
+                cols=str(len(header))              # ヘッダ分だけ確保
+            )
+            ws.append_row(header)
+        except gspread.exceptions.APIError as e:
+            # 競合で既に作られた可能性 → 取り直し
+            try:
+                ws = spreadsheet.worksheet(sheet_name)
+            except Exception:
+                raise e
+
     cache[sheet_name] = ws
     st.session_state[WS_CACHE_KEY] = cache
     return ws
+
 
 
 
@@ -174,7 +187,7 @@ def get_profile(user):
 
 #Penley & Tomaka 2002, Carver & Connor-Smith 2010, Stewart 2000, Frontiers 2023
 # === Big Fiveトーン + 複合パターン対応 ===
-import random
+
 
 def determine_tone(profile, match=True):
     def flip(value): return 20 if value >= 60 else 80 if value <= 40 else 50
@@ -454,8 +467,7 @@ Assistant:
 
         progress.text(f"{username}: {turn_index}/{len(user_inputs)} processed...")
         time.sleep(delay_sec)
-
-
+    
 
 # === 危機対応 ===
 def handle_crisis(user_input):
@@ -833,7 +845,7 @@ if user_name.lower() == "admin":
     st.sidebar.subheader("Slow Simulation (rate-limited)")
     sim_users_slow = st.sidebar.number_input("Users (slow)", min_value=1, max_value=50, value=1, step=1)
     sim_step_slow  = st.sidebar.slider("Trait window (±, slow)", min_value=5, max_value=20, value=10, step=1)
-    sim_turns_slow = st.sidebar.slider("Turns/user (slow)", min_value=10, max_value=120, value=60, step=10)
+    sim_turns_slow = 60
     sim_delay      = st.sidebar.slider("Delay between turns (sec)", min_value=0.5, max_value=10.0, value=2.0, step=0.5)
     use_disjoint_batches = st.sidebar.checkbox("Use disjoint 60-text batches (no overlap)", value=True)
 
@@ -876,18 +888,31 @@ if user_name.lower() == "admin":
                     )
 
                     st.info(f"Slow run for {username} | center={b['center']} | turns={len(b['texts'])} | condition={experiment_condition}")
-                    run_simulation_for_user_slow(
-                        username=username,
-                        profile_dict=profile_dict,
-                        user_inputs=b["texts"],      # ← 60件の重複ゼロセット
-                        session_id=session_id,       # ← 必ず渡す
-                        flip_after=30,               # ← Personalizedのみ効く
-                        delay_sec=float(sim_delay)
-                    )
 
-                # 3) ポインタ更新（1回だけ）
-                st.session_state.DISJOINT_PTR = end_ptr
-                write_sim_state("DISJOINT_PTR", end_ptr)
+                    # （任意：事前にログWSを作成すると切替時も安定）
+                    if experiment_condition == "Personalized Empathy":
+                        _ = get_user_log_ws_cached(username, matched=False)  # NoMatch
+                        _ = get_user_log_ws_cached(username, matched=True)   # Matched
+                    else:
+                        _ = get_user_log_ws_cached(username, matched=False)  # Fixedは1枚のみ
+
+                    try:
+                        run_simulation_for_user_slow(
+                                username=username,
+                                profile_dict=profile_dict,
+                                user_inputs=b["texts"],
+                                session_id=session_id,
+                                flip_after=30,
+                                delay_sec=float(sim_delay)
+                        )
+                    except Exception as e:
+                        st.error(f"Simulation failed for {username}: {e}")
+                        break
+
+                    next_ptr = bidx + 1
+                    st.session_state.DISJOINT_PTR = next_ptr
+                    write_sim_state("DISJOINT_PTR", next_ptr)
+
 
             else:
                 # 旧来の「±windowから60件サンプル」モード
@@ -925,6 +950,15 @@ if user_name.lower() == "admin":
                     )
 
                     st.info(f"Slow run for {username}, center={center}, inputs={len(inputs)}, condition={experiment_condition}")
+                    
+
+                    if experiment_condition == "Personalized Empathy":
+                        _ = get_user_log_ws_cached(username, matched=False)  # NoMatch
+                        _ = get_user_log_ws_cached(username, matched=True)   # Matched
+                    else:
+                        _ = get_user_log_ws_cached(username, matched=False)  # Fixed は1枚だけ
+
+                    
                     run_simulation_for_user_slow(
                         username=username,
                         profile_dict=profile_dict,
