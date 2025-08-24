@@ -51,7 +51,8 @@ def get_user_log_ws_cached(username: str, matched: bool):
         "GroupID","UserIndex","GroupUser",
         # One-hot（必要なら残す／セル節約したいなら削除OK）
         "Group 1","Group 2","Group 3","Group 4","Group 5",
-        "Group 6","Group 7","Group 8","Group 9","Group 10"
+        "Group 6","Group 7","Group 8","Group 9","Group 10",
+        "Tone_E","Tone_A","Tone_C","Tone_ES","Tone_O"
     ]
 
     try:
@@ -126,25 +127,24 @@ def ensure_personality_row(username: str, session_id: str, experiment_condition:
 
 def log_chat_to_sheet(ws, session_id, username, user_msg, ai_msg,
                       timestamp, experiment, matched_bool,
-                      turn, phase, group_id, user_index):
+                      turn, phase, group_id, user_index,
+                      tone_e=None, tone_a=None, tone_c=None, tone_es=None, tone_o=None):
     matched_str = "Matched" if matched_bool else "NoMatch"
     group_user = f"Group {group_id} Simulated User {user_index}"
-    # One-hot 10列
     onehot = [1 if (i+1) == int(group_id) else 0 for i in range(10)]
 
-    # User行
+    row_tail = [*onehot, tone_e, tone_a, tone_c, tone_es, tone_o]
+
     safe_append_ws(ws, [
         session_id, username, "User", user_msg, timestamp,
         experiment, matched_str, turn, phase,
-        group_id, user_index, group_user, *onehot
+        group_id, user_index, group_user, *row_tail
     ])
-    # AI行
     safe_append_ws(ws, [
         session_id, username, "AI", ai_msg, timestamp,
         experiment, matched_str, turn, phase,
-        group_id, user_index, group_user, *onehot
+        group_id, user_index, group_user, *row_tail
     ])
-
 
 
 # === セッション管理 ===
@@ -187,13 +187,22 @@ def get_profile(user):
 
 #Penley & Tomaka 2002, Carver & Connor-Smith 2010, Stewart 2000, Frontiers 2023
 # === Big Fiveトーン + 複合パターン対応 ===
-
-
 def determine_tone(profile, match=True):
-    def flip(value): return 20 if value >= 60 else 80 if value <= 40 else 50
-    def adjusted(trait): return int(profile.get(trait, 50)) if match else flip(int(profile.get(trait, 50)))
+    def clamp01(x): return max(0, min(100, int(x)))
 
-    ex, ag, co, es, op = [adjusted(t) for t in ["Extraversion","Agreeableness","Conscientiousness","Emotional Stability","Openness"]]
+    def flip(value): 
+        v = clamp01(value)
+        return 100 - v
+
+    def adjusted(trait): 
+        v = int(profile.get(trait, 50))
+        return v if match else flip(v)
+
+    ex = adjusted("Extraversion")
+    ag = adjusted("Agreeableness")
+    co = adjusted("Conscientiousness")
+    es = adjusted("Emotional Stability")
+    op = adjusted("Openness")
 
     tone = "cheerful and engaging" if ex >= 60 else "calm and measured"
     empathy = "warm and supportive" if ag >= 60 else "matter-of-fact but polite"
@@ -201,13 +210,12 @@ def determine_tone(profile, match=True):
     emotional = "steady and reassuring" if es >= 60 else "gentle and calming"
     creativity = "curious and imaginative" if op >= 60 else "practical and simple"
 
-    # Personality-based coping instructions
     suggestions_map = []
-    if es <= 40 and co <= 40:  # 高N＋低C
+    if es <= 40 and co <= 40:
         suggestions_map.append("Try breaking big tasks into small steps and reframe stress as a challenge.")
-    if ex >= 60 and co <= 40:  # 高E＋低C
+    if ex >= 60 and co <= 40:
         suggestions_map.append("Plan a fun social activity that gives you energy but adds a little structure.")
-    if es <= 40 and ex <= 40:  # 高N＋低E（Type D）
+    if es <= 40 and ex <= 40:
         suggestions_map.append("Express your feelings safely, like journaling, or try a mindfulness break.")
     if ex >= 60 and co >= 60:
         suggestions_map.append("Set a short-term goal and tackle it with a friend to stay motivated.")
@@ -216,7 +224,6 @@ def determine_tone(profile, match=True):
     if op >= 60:
         suggestions_map.append("Try a creative outlet like art or music, or explore a new hobby.")
 
-    # Combine 2 suggestions randomly
     if not suggestions_map:
         suggestions_map.append("Offer practical coping ideas based on their personality.")
     special_instruction = " ".join(random.sample(suggestions_map, min(2, len(suggestions_map))))
@@ -227,8 +234,11 @@ def determine_tone(profile, match=True):
         "style": style,
         "emotional": emotional,
         "creativity": creativity,
-        "special_instruction": special_instruction
+        "special_instruction": special_instruction,
+        # ★ 追加：実際に使った値
+        "used_traits": {"E": ex, "A": ag, "C": co, "ES": es, "O": op}
     }
+
 
 # ==== ここから Big5Chat ベースの擬似ユーザー生成 & 自動会話シミュレーション ==== #
 
@@ -402,6 +412,7 @@ def run_simulation_for_user_slow(username, profile_dict, user_inputs, session_id
         # トーン分岐
         if exp_cond == "Fixed Empathy":
             tone_instruction = "Respond in a calm, supportive tone, like a counselor."
+            used = {"E": "", "A": "", "C": "", "ES": "", "O": ""}        
         else:
             tone_data = determine_tone(profile_dict, match=match)
             tone_instruction = (
@@ -409,7 +420,7 @@ def run_simulation_for_user_slow(username, profile_dict, user_inputs, session_id
                 f"Keep tone {tone_data['emotional']} and include {tone_data['creativity']} ideas. "
                 f"{tone_data['special_instruction']}"
             )
-
+            used = tone_data["used_traits"]
         profile_summary = ", ".join([
             f"Extraversion={profile_dict.get('Extraversion','N/A')}",
             f"Agreeableness={profile_dict.get('Agreeableness','N/A')}",
@@ -462,7 +473,8 @@ Assistant:
             turn_index,         # 9) Turn (1..60)
             phase,              # 10) Phase
             group_id,           # 11) GroupID
-            user_index          # 12) UserIndex
+            user_index,          # 12) UserIndex
+            used.get("E",""), used.get("A",""), used.get("C",""), used.get("ES",""), used.get("O","")
         )
 
         progress.text(f"{username}: {turn_index}/{len(user_inputs)} processed...")
@@ -713,6 +725,13 @@ if page == "Chat Session":
         # モード設定
         if st.session_state.get("experiment_condition") == "Fixed Empathy":
             tone_instruction = "Respond in a calm, supportive tone, like a counselor."
+            used = {
+                "E": profile.get("Extraversion", ""),
+                "A": profile.get("Agreeableness", ""),
+                "C": profile.get("Conscientiousness", ""),
+                "ES": profile.get("Emotional Stability", ""),
+                "O": profile.get("Openness", "")
+            }            
         else:
             tone_data = determine_tone(profile, match=(st.session_state.turn_index >= 30))
             tone_instruction = (
@@ -720,7 +739,7 @@ if page == "Chat Session":
                 f"Keep tone {tone_data['emotional']} and include {tone_data['creativity']} ideas. "
                 f"{tone_data['special_instruction']}"
             )
-
+            used = tone_data["used_traits"]
 
         crisis_msg = handle_crisis(user_input)
         if crisis_msg:
@@ -777,7 +796,8 @@ if page == "Chat Session":
             st.session_state.turn_index,
             phase,
             group_id,
-            user_index
+            user_index,
+            used.get("E",""), used.get("A",""), used.get("C",""), used.get("ES",""), used.get("O","")
         )
 
 
