@@ -412,7 +412,13 @@ def run_simulation_for_user_slow(username, profile_dict, user_inputs, session_id
         # トーン分岐
         if exp_cond == "Fixed Empathy":
             tone_instruction = "Respond in a calm, supportive tone, like a counselor."
-            used = {"E": "", "A": "", "C": "", "ES": "", "O": ""}        
+            used = {
+                "E": profile_dict.get("Extraversion", 50),
+                "A": profile_dict.get("Agreeableness", 50),
+                "C": profile_dict.get("Conscientiousness", 50),
+                "ES": profile_dict.get("Emotional Stability", 50),
+                "O": profile_dict.get("Openness", 50),
+            }      
         else:
             tone_data = determine_tone(profile_dict, match=match)
             tone_instruction = (
