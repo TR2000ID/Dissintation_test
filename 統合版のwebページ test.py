@@ -283,7 +283,7 @@ def load_big5chat():
         "n":"Emotional Stability","neuroticism":"Emotional Stability","emotional stability":"Emotional Stability",
         "o":"Openness","openness":"Openness",
     }
-    level_map = {"high":80, "medium":50, "mid":50, "low":20}
+    level_map = {"high":80, "medium":60, "mid":60, "low":20}
     if "trait" in df.columns:
         tseries = df["trait"].astype(str).str.strip().str.lower().map(trait_map)
         if "level" in df.columns:
