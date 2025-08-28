@@ -513,15 +513,15 @@ Assistant:
 def call_api(prompt):
     API_URL = "https://royalmilktea103986368-dissintation.hf.space/generate"
     payload = {"prompt": prompt, "max_tokens": 180, "temperature": 0.7, "top_p": 0.95}
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            r = requests.post(API_URL, json=payload, timeout=30)
+            r = requests.post(API_URL, json=payload, timeout=60)
             if r.status_code == 200:
                 text = r.json().get("response", "").strip()
                 if text:
                     return text.split("Assistant:")[-1].replace("\n\n", "\n").strip()
         except:
-            time.sleep(2)
+            time.sleep(2 ** attempt)
     return None
 
 # === ユーザーとページ管理 ===
@@ -855,6 +855,12 @@ def write_sim_state(key, value):
     safe_append_ws(ws, [key, str(value), ts])
 
 
+def next_slow_seq():
+    val = read_sim_state("SLOW_SEQ")
+    val = 0 if val is None else int(val)
+    write_sim_state("SLOW_SEQ", val + 1)
+    return val + 1
+
 
 # === Admin Debug Panel ===
 if user_name.lower() == "admin":
@@ -881,15 +887,23 @@ if user_name.lower() == "admin":
             rng = random.Random(42)
 
             if use_disjoint_batches:
-                # 1) 60件バッチを一度だけ構築 & 進捗ポインタの読み戻し
-                if "DISJOINT_BATCHES" not in st.session_state:
-                    st.session_state.DISJOINT_BATCHES = build_disjoint_batches(df, batch_size=int(sim_turns_slow), seed=42)
 
+                if "DISJOINT_BATCHES" not in st.session_state:
+                    st.session_state.DISJOINT_BATCHES = build_disjoint_batches(
+                        df, batch_size=int(sim_turns_slow), seed=42
+                    )
+                # 1) 60件バッチを一度だけ構築 & 進捗ポインタの読み戻し
+                batches = st.session_state.DISJOINT_BATCHES
+                total_batches = len(st.session_state.DISJOINT_BATCHES)
                 ptr_saved = read_sim_state("DISJOINT_PTR")
                 ptr = ptr_saved if ptr_saved is not None else st.session_state.get("DISJOINT_PTR", 0)
 
+                st.sidebar.write(f"Progress: {ptr} / {total_batches}")
+                run_all = st.sidebar.checkbox("Run ALL remaining (disjoint)", value=False)
+
                 batches = st.session_state.DISJOINT_BATCHES
-                take = int(sim_users_slow)
+                remaining = total_batches - ptr    
+                take = remaining if run_all else int(sim_users_slow) 
                 end_ptr = min(ptr + take, len(batches))
 
                 # 2) 交互割当 → 登録 → 実行（毎ユーザー固有の SessionID）
@@ -933,7 +947,8 @@ if user_name.lower() == "admin":
                         )
                     except Exception as e:
                         st.error(f"Simulation failed for {username}: {e}")
-                        break
+                        write_sim_state("FAILED_USER", username)
+                        continue
 
                     next_ptr = bidx + 1
                     st.session_state.DISJOINT_PTR = next_ptr
@@ -941,16 +956,22 @@ if user_name.lower() == "admin":
 
 
             else:
-                # 旧来の「±windowから60件サンプル」モード
+                # 旧来の「±windowから60件サンプル」モード（ユーザー名を disjoint と同形式で統一）
                 for i in range(int(sim_users_slow)):
                     _all_profiles = get_all_profiles_cached()
                     existing_users = [row.get("Username") for row in _all_profiles]
                     experiment_condition = "Fixed Empathy" if (len(existing_users) % 2 == 0) else "Personalized Empathy"
                     st.session_state.experiment_condition = experiment_condition
 
-                    username = f"SimUser_{len(existing_users)+1}_{'Fixed' if experiment_condition=='Fixed Empathy' else 'Personalized'}"
-                    session_id = str(uuid.uuid4())  # ← 毎ユーザー固有
+                    # ← NEW: 連番から group_id / user_index を決める
+                    seq = next_slow_seq()             # 1,2,3,...
+                    group_id = ((seq - 1) % 10) + 1   # 1..10 を周回
+                    user_index = ((seq - 1) // 10) + 1
 
+                    username = f"Group {group_id} Simulated User {user_index}"
+                    session_id = str(uuid.uuid4())  # 毎ユーザー固有
+
+                    # センターを抽出して ±window のグループを形成
                     row = df.iloc[rng.randrange(0, len(df))]
                     center = {
                         "Extraversion": to_bins(row['Extraversion'], step=sim_step_slow),
@@ -972,26 +993,25 @@ if user_name.lower() == "admin":
                         session_id=session_id,
                         experiment_condition=experiment_condition,
                         profile_dict=profile_dict,
-                        responses_json='{"source":"simulation"}'
+                        responses_json=json.dumps({"source":"simulation","group":group_id,"user_index":user_index})
                     )
 
                     st.info(f"Slow run for {username}, center={center}, inputs={len(inputs)}, condition={experiment_condition}")
-                    
 
                     if experiment_condition == "Personalized Empathy":
-                        _ = get_user_log_ws_cached(username, matched=False)  # NoMatch
-                        _ = get_user_log_ws_cached(username, matched=True)   # Matched
+                        _ = get_user_log_ws_cached(username, matched=False)
+                        _ = get_user_log_ws_cached(username, matched=True)
                     else:
-                        _ = get_user_log_ws_cached(username, matched=False)  # Fixed は1枚だけ
+                        _ = get_user_log_ws_cached(username, matched=False)
 
-                    
                     run_simulation_for_user_slow(
                         username=username,
                         profile_dict=profile_dict,
                         user_inputs=inputs,
-                        session_id=session_id,       # ← 必ず渡す
+                        session_id=session_id,
                         flip_after=30,
                         delay_sec=float(sim_delay)
                     )
+
 
         st.success("Slow simulation finished.")
