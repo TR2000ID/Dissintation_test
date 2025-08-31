@@ -2,3 +2,4 @@ streamlit
 gspread
 oauth2client
 requests
+streamlit-extras==0.4.0

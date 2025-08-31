@@ -10,6 +10,19 @@ import time
 import random
 import math
 import pandas as pd
+
+# --- Keep-alive: 4分ごとに自動リフレッシュして視聴者アクセスを維持 ---
+try:
+    from streamlit_extras.st_autorefresh import st_autorefresh
+    # interval: ミリ秒。Streamlitがスリープする前に軽いアクセスを発生させる
+    st_autorefresh(interval=4 * 60 * 1000, key="keepalive")  # 4分
+except Exception:
+    # 代替: メタリフレッシュ（ブラウザがタブを殺す環境なら効かないことも）
+    import streamlit as st
+    st.markdown("<meta http-equiv='refresh' content='300'>", unsafe_allow_html=True)
+
+
+
 # === Google Sheets 認証 ===
 creds_dict = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"].to_dict()
 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
