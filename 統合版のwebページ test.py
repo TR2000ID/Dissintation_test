@@ -869,11 +869,6 @@ if user_name.lower() == "admin":
     st.sidebar.write(f"Your Condition: {st.session_state['experiment_condition']}")
     st.sidebar.write(f"Match Mode: {st.session_state.get('matched_mode', False)}")
 
-    # 追加: 全ユーザー一覧表示（キャッシュ使用）
-    st.sidebar.subheader("All Users")
-    for p in get_all_profiles_cached():
-        st.sidebar.write(f"{p.get('Username')} | Condition: {p.get('ExperimentCondition', 'N/A')} | Match: {p.get('MatchMode', 'N/A')}")
-
     st.sidebar.markdown("---")
     st.sidebar.subheader("Slow Simulation (rate-limited)")
     sim_users_slow = st.sidebar.number_input("Users (slow)", min_value=1, max_value=50, value=1, step=1)
