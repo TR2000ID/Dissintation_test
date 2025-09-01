@@ -326,6 +326,9 @@ def build_disjoint_batches(df: pd.DataFrame, batch_size: int = 60, seed: int = 4
         # 60件ずつに切る（余りは捨てる）
         full_len = len(idxs) - (len(idxs) % batch_size)
         for uidx, start in enumerate(range(0, full_len, batch_size), start=1):
+            if uidx>65:
+                break
+            
             batch_indices = idxs[start:start+batch_size]
             texts = df.loc[batch_indices, "text"].astype(str).tolist()
             center_dict = {
@@ -960,9 +963,12 @@ if user_name.lower() == "admin":
                     st.session_state.experiment_condition = experiment_condition
 
                     # ← NEW: 連番から group_id / user_index を決める
-                    seq = next_slow_seq()             # 1,2,3,...
-                    group_id = ((seq - 1) % 10) + 1   # 1..10 を周回
-                    user_index = ((seq - 1) // 10) + 1
+                    # ===== 置換ここから =====
+                    GROUP_MAX = 65
+
+                    seq = next_slow_seq()                     # 1, 2, 3, ...
+                    group_id  = ((seq - 1) // GROUP_MAX) + 1  # 65人ごとに group_id が増える: 1,1,..,1(65人),2,2,..,2(65人),3...
+                    user_index = ((seq - 1) % GROUP_MAX) + 1  # 各グループ内の通番: 1..65
 
                     username = f"Group {group_id} Simulated User {user_index}"
                     session_id = str(uuid.uuid4())  # 毎ユーザー固有
