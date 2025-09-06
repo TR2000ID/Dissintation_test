@@ -401,7 +401,7 @@ def make_user_inputs_from_group(gdf, min_count=60, seed=0):
         i += 1
     return out
 
-def run_simulation_for_user_slow(username, profile_dict, user_inputs, session_id, flip_after=30, delay_sec=2.0):
+def run_simulation_for_user_slow(username, profile_dict, user_inputs, session_id, flip_after=30, delay_sec=0):
     chat_history = []
     progress = st.empty()
 
@@ -488,7 +488,6 @@ Assistant:
         )
 
         progress.text(f"{username}: {turn_index}/{len(user_inputs)} processed...")
-        time.sleep(delay_sec)
     
 
 # === 危機対応 ===
@@ -519,7 +518,7 @@ def call_api(prompt):
     payload = {"prompt": prompt, "max_tokens": 180, "temperature": 0.7, "top_p": 0.95}
     for attempt in range(4):
         try:
-            r = requests.post(API_URL, json=payload, timeout=60)
+            r = requests.post(API_URL, json=payload, timeout=20)
             if r.status_code == 200:
                 text = r.json().get("response", "").strip()
                 if text:
@@ -857,6 +856,41 @@ def write_sim_state(key, value):
     ws = get_meta_ws()
     ts = datetime.utcnow().isoformat() 
     safe_append_ws(ws, [key, str(value), ts])
+
+
+# ==== Checkpoint helpers (resume on rerun) ====
+CKP_USER_KEY   = "CKP_USER"      # "Group X Simulated User Y"
+CKP_TURN_KEY   = "CKP_TURN"      # 最後に完了したターン番号（int）
+CKP_MODE_KEY   = "CKP_MODE"      # 'Fixed' / 'Pers_NoMatch' / 'Pers_Matched'
+CKP_SESSION_KEY= "CKP_SESSION"   # セッションID
+
+def read_checkpoint():
+    user = read_sim_state(CKP_USER_KEY)
+    turn = read_sim_state(CKP_TURN_KEY)
+    mode = read_sim_state(CKP_MODE_KEY)
+    sid  = read_sim_state(CKP_SESSION_KEY)
+    if user is None or turn is None:
+        return None
+    return {
+        "username": user if isinstance(user, str) else str(user),
+        "last_turn": int(turn),
+        "mode": (mode if isinstance(mode, str) else str(mode)) if mode is not None else "",
+        "session_id": (sid if isinstance(sid, str) else str(sid)) if sid is not None else ""
+    }
+
+def write_checkpoint(username, last_turn, mode, session_id):
+    write_sim_state(CKP_USER_KEY, username)
+    write_sim_state(CKP_TURN_KEY, int(last_turn))
+    write_sim_state(CKP_MODE_KEY, mode)
+    write_sim_state(CKP_SESSION_KEY, session_id)
+
+def clear_checkpoint():
+    write_sim_state(CKP_USER_KEY, "")
+    write_sim_state(CKP_TURN_KEY, -1)
+    write_sim_state(CKP_MODE_KEY, "")
+    write_sim_state(CKP_SESSION_KEY, "")
+
+
 
 
 def next_slow_seq():
